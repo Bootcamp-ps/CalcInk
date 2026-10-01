@@ -37,7 +37,7 @@ export interface Stroke {
 
 export type StrokeAction =
   | { type: 'add'; stroke: Stroke }
-  | { type: 'remove'; strokes: Stroke[] }
+  | { type: 'remove'; strokes: Stroke[]; indices?: readonly number[] }
   /** Pixel eraser: stores only changed strokes, not a full canvas snapshot. */
   | { type: 'replace'; before: Stroke[]; after: Stroke[] }
   | { type: 'clear'; strokes: Stroke[] };
