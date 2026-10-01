@@ -1,0 +1,51 @@
+.page-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Base style for all stacked canvas layers */
+.canvas-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Layer 1: stroke-canvas (committed ink) */
+.stroke-canvas {
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Layer 2: live-canvas (receives pointer events, in-progress stroke) */
+.live-canvas {
+  pointer-events: auto;
+  touch-action: none;
+  cursor: crosshair;
+  z-index: 20;
+}
+
+/* Layer 3: answer-canvas (future math results, non-interactive) */
+.answer-canvas {
+  pointer-events: none;
+  z-index: 30;
+}
+
+/* Visually hidden text for screen readers (FR-28 / aria-live) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
