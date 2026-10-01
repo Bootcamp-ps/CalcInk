@@ -1,37 +1,50 @@
-/* Design tokens — CSS custom properties */
+/* variables.css — Design tokens (CSS custom properties).
+ *
+ * Paper-tone-specific variables (--paper-bg, --paper-chrome, etc.) are
+ * written dynamically by paperTexture.ts applyPaperCSS() onto the .paper
+ * element. The tokens here are UI-level defaults that work regardless of tone.
+ */
 
 :root {
-  /* Paper */
-  --color-paper: #faf8f5;
-  --color-bg: #f0ede8;
-  --color-text: #1a1a2e;
-  --color-border: #d9d5cf;
-
-  /* Ink */
-  --color-ink: #1a1a2e;
-  --color-answer: #2563eb;
-
-  /* UI */
+  /* UI chrome */
   --color-primary: #2563eb;
   --color-primary-hover: #1d4ed8;
   --radius: 8px;
   --toolbar-size: 48px;
+
+  /* Fallback paper tokens (overridden per-tone by applyPaperCSS) */
+  --paper-bg: #faf8f5;
+  --paper-chrome: #f0ede8;
+  --paper-line: #d9c8a8;
+  --paper-border: #d9d5cf;
+  --paper-text: #1a1a2e;
+
+  /* Legacy tokens kept for existing components that reference them */
+  --color-paper: var(--paper-bg);
+  --color-bg: var(--paper-chrome);
+  --color-text: var(--paper-text);
+  --color-border: var(--paper-border);
+  --color-ink: #1a1a2e;
+  --color-answer: #2563eb;
 }
 
-/* Dark / chalkboard theme */
+/* Dark / chalkboard system preference fallback
+   (the actual chalkboard paper tone overrides these via applyPaperCSS) */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-paper: #1e293b;
-    --color-bg: #0f172a;
-    --color-text: #e2e8f0;
-    --color-border: #334155;
-    --color-ink: #e2e8f0;
-    --color-answer: #60a5fa;
+    --paper-bg: #1e2d25;
+    --paper-chrome: #162019;
+    --paper-border: #334d3d;
+    --paper-text: #e8f5eb;
+    --color-ink: #f1f5f9;
+    --color-answer: #7dd3fc;
   }
 }
 
-/* Reset */
-*, *::before, *::after {
+/* ─── Reset ─────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -39,4 +52,17 @@ body {
   margin: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Screen-reader only utility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }

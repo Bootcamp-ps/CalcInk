@@ -1,1 +1,27 @@
-/* Paper theme styles — plain, grid, dot, ruled, chalkboard (FR-17) */
+/* paper.css — Paper layer visual styles.
+ *
+ * Requirements: FR-16, FR-17, FR-20.
+ *
+ * The .paper element uses CSS custom properties set by applyPaperCSS()
+ * (paperTexture.ts). These classes handle the 200ms colour transition and
+ * the pointer-events: none constraint.
+ *
+ * Nothing here runs per frame. The background is set once on spec change.
+ */
+
+.paper {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+
+  /* 200ms colour transition (disabled under prefers-reduced-motion) */
+  transition:
+    background-color 200ms ease,
+    background 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .paper {
+    transition: none;
+  }
+}
