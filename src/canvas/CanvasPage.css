@@ -31,6 +31,11 @@
   z-index: 20;
 }
 
+.live-canvas.tool-stroke-eraser,
+.live-canvas.tool-pixel-eraser {
+  cursor: cell;
+}
+
 /* Layer 3: answer-canvas (future math results, non-interactive) */
 .answer-canvas {
   pointer-events: none;
