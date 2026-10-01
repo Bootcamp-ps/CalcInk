@@ -1,0 +1,42 @@
+/* Design tokens — CSS custom properties */
+
+:root {
+  /* Paper */
+  --color-paper: #faf8f5;
+  --color-bg: #f0ede8;
+  --color-text: #1a1a2e;
+  --color-border: #d9d5cf;
+
+  /* Ink */
+  --color-ink: #1a1a2e;
+  --color-answer: #2563eb;
+
+  /* UI */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --radius: 8px;
+  --toolbar-size: 48px;
+}
+
+/* Dark / chalkboard theme */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: #1e293b;
+    --color-bg: #0f172a;
+    --color-text: #e2e8f0;
+    --color-border: #334155;
+    --color-ink: #e2e8f0;
+    --color-answer: #60a5fa;
+  }
+}
+
+/* Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
