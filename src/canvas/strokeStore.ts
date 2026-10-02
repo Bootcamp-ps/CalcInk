@@ -1,177 +1,337 @@
-// ─── Stroke Store ──────────────────────────────────────────────────
-// Manages strokes with undo/redo. Pure state, no rendering.
+/**
+ * strokeStore.ts — Framework-agnostic store for CalcInk drawing strokes.
+ *
+ * Requirements: FR-11, FR-14.
+ * - Monotonically increasing version counter.
+ * - Immutable strokes.
+ * - Undo/redo history capped at 100 actions.
+ * - Supports add, remove, replace, and clear actions.
+ * - Undo/redo restores exact affected strokes in-place without full snapshots.
+ * - Pub-sub event reporting with changed stroke IDs.
+ * - Zero React imports.
+ */
 
-import { Stroke, Point, generateStrokeId } from './strokeModel';
+import type { Stroke, StrokeAction } from '../contract';
 
-export type StrokeAction =
-  | { type: 'add'; stroke: Stroke }
-  | { type: 'remove'; strokeIds: string[] }
-  | { type: 'clear'; strokes: Stroke[] };
+export interface StrokeStoreEvent {
+  action:
+    | StrokeAction
+    | { type: 'undo'; revertedAction: StrokeAction }
+    | { type: 'redo'; appliedAction: StrokeAction };
+  changedStrokeIds: readonly string[];
+  version: number;
+}
 
-const MAX_UNDO_STACK = 100;
+export type StrokeStoreListener = (event: StrokeStoreEvent) => void;
 
 export class StrokeStore {
-  private _strokes: Stroke[] = [];
+  public static readonly MAX_HISTORY = 100;
+
+  private _strokes: readonly Stroke[] = [];
   private _undoStack: StrokeAction[] = [];
   private _redoStack: StrokeAction[] = [];
-  private _listeners: Set<() => void> = new Set();
+  private _version = 0;
+  private readonly _listeners = new Set<StrokeStoreListener>();
 
-  get strokes(): readonly Stroke[] {
+  /** All currently active strokes on the canvas in render order. */
+  public get strokes(): readonly Stroke[] {
     return this._strokes;
   }
 
-  get canUndo(): boolean {
+  /** Monotonically increasing version counter. */
+  public get version(): number {
+    return this._version;
+  }
+
+  public get canUndo(): boolean {
     return this._undoStack.length > 0;
   }
 
-  get canRedo(): boolean {
+  public get canRedo(): boolean {
     return this._redoStack.length > 0;
   }
 
-  subscribe(listener: () => void): () => void {
+  /**
+   * Subscribe to store mutations.
+   * Returns an unsubscribe function.
+   */
+  public subscribe(listener: StrokeStoreListener): () => void {
     this._listeners.add(listener);
-    return () => this._listeners.delete(listener);
+    return () => {
+      this._listeners.delete(listener);
+    };
   }
 
-  private _notify() {
-    for (const l of this._listeners) l();
-  }
-
-  private _pushUndo(action: StrokeAction) {
-    this._undoStack.push(action);
-    if (this._undoStack.length > MAX_UNDO_STACK) {
-      this._undoStack.shift();
-    }
-    // Any new action clears the redo stack
+  /**
+   * Commits a new stroke to the canvas.
+   * Clears redo history and increments version.
+   */
+  public add(stroke: Stroke): void {
+    const action: StrokeAction = { type: 'add', stroke };
+    this._strokes = [...this._strokes, stroke];
+    this._pushUndoAction(action);
     this._redoStack = [];
+    this._version += 1;
+
+    this._notify({
+      action,
+      changedStrokeIds: [stroke.id],
+      version: this._version,
+    });
   }
 
-  addStroke(points: Point[], width: number, color: string = '#1a1a2e'): Stroke {
-    const stroke: Stroke = {
-      id: generateStrokeId(),
-      points: [...points],
-      width,
-      color,
+  /**
+   * Removes one or more strokes from the canvas (e.g. via stroke eraser).
+   * Clears redo history and increments version.
+   */
+  public remove(strokes: readonly Stroke[]): void {
+    if (strokes.length === 0) return;
+
+    const removeIds = new Set(strokes.map((s) => s.id));
+    const toRemove: Stroke[] = [];
+    const indices: number[] = [];
+
+    this._strokes.forEach((stroke, index) => {
+      if (removeIds.has(stroke.id)) {
+        toRemove.push(stroke);
+        indices.push(index);
+      }
+    });
+
+    if (toRemove.length === 0) return;
+
+    this._strokes = this._strokes.filter((s) => !removeIds.has(s.id));
+    const action: StrokeAction = { type: 'remove', strokes: toRemove, indices };
+    this._pushUndoAction(action);
+    this._redoStack = [];
+    this._version += 1;
+
+    this._notify({
+      action,
+      changedStrokeIds: toRemove.map((s) => s.id),
+      version: this._version,
+    });
+  }
+
+  /**
+   * Replaces strokes in-place (e.g. via pixel eraser splitting a stroke).
+   * Restores exact before/after on undo/redo with no full canvas snapshot.
+   */
+  public replace(before: readonly Stroke[], after: readonly Stroke[]): void {
+    if (before.length === 0 && after.length === 0) return;
+
+    const beforeIds = new Set(before.map((s) => s.id));
+    const newStrokes: Stroke[] = [];
+    let replaced = false;
+
+    for (const stroke of this._strokes) {
+      if (beforeIds.has(stroke.id)) {
+        if (!replaced) {
+          newStrokes.push(...after);
+          replaced = true;
+        }
+      } else {
+        newStrokes.push(stroke);
+      }
+    }
+
+    if (!replaced) return;
+
+    this._strokes = newStrokes;
+    const action: StrokeAction = {
+      type: 'replace',
+      before: [...before],
+      after: [...after],
     };
-    this._strokes.push(stroke);
-    this._pushUndo({ type: 'add', stroke });
-    this._notify();
-    return stroke;
+
+    this._pushUndoAction(action);
+    this._redoStack = [];
+    this._version += 1;
+
+    const changedIds = Array.from(
+      new Set([...before.map((s) => s.id), ...after.map((s) => s.id)])
+    );
+
+    this._notify({
+      action,
+      changedStrokeIds: changedIds,
+      version: this._version,
+    });
   }
 
-  removeStrokes(ids: string[]): void {
-    const removed = this._strokes.filter(s => ids.includes(s.id));
-    if (removed.length === 0) return;
-    this._strokes = this._strokes.filter(s => !ids.includes(s.id));
-    this._pushUndo({ type: 'remove', strokeIds: ids });
-    // Store removed strokes in the action for redo
-    this._undoStack[this._undoStack.length - 1] = {
-      type: 'remove',
-      strokeIds: ids,
-      // @ts-expect-error — extending the type for undo
-      _removedStrokes: removed,
-    };
-    this._notify();
-  }
-
-  clear(): void {
+  /**
+   * Clears all strokes on the canvas.
+   * Cleared strokes can be restored via undo (FR-11).
+   */
+  public clear(): void {
     if (this._strokes.length === 0) return;
-    const oldStrokes = [...this._strokes];
+
+    const cleared = this._strokes;
+    const action: StrokeAction = { type: 'clear', strokes: [...cleared] };
     this._strokes = [];
-    this._pushUndo({ type: 'clear', strokes: oldStrokes });
-    this._notify();
+    this._pushUndoAction(action);
+    this._redoStack = [];
+    this._version += 1;
+
+    this._notify({
+      action,
+      changedStrokeIds: cleared.map((s) => s.id),
+      version: this._version,
+    });
   }
 
-  undo(): void {
+  /**
+   * Undoes the most recent action.
+   */
+  public undo(): boolean {
     const action = this._undoStack.pop();
-    if (!action) return;
+    if (!action) return false;
+
+    let changedIds: string[] = [];
 
     switch (action.type) {
-      case 'add':
-        this._strokes = this._strokes.filter(s => s.id !== action.stroke.id);
-        break;
-      case 'remove': {
-        // @ts-expect-error — accessing extended property
-        const removedStrokes: Stroke[] = action._removedStrokes || [];
-        this._strokes.push(...removedStrokes);
+      case 'add': {
+        this._strokes = this._strokes.filter((s) => s.id !== action.stroke.id);
+        changedIds = [action.stroke.id];
         break;
       }
-      case 'clear':
-        this._strokes = [...action.strokes];
+      case 'remove': {
+        if (action.indices) {
+          const newStrokes = [...this._strokes];
+          for (let i = 0; i < action.strokes.length; i++) {
+            const idx = action.indices[i] ?? newStrokes.length;
+            const stroke = action.strokes[i]!;
+            newStrokes.splice(idx, 0, stroke);
+          }
+          this._strokes = newStrokes;
+        } else {
+          this._strokes = [...this._strokes, ...action.strokes];
+        }
+        changedIds = action.strokes.map((s) => s.id);
         break;
+      }
+      case 'replace': {
+        const afterIds = new Set(action.after.map((s) => s.id));
+        const newStrokes: Stroke[] = [];
+        let replaced = false;
+
+        for (const stroke of this._strokes) {
+          if (afterIds.has(stroke.id)) {
+            if (!replaced) {
+              newStrokes.push(...action.before);
+              replaced = true;
+            }
+          } else {
+            newStrokes.push(stroke);
+          }
+        }
+
+        if (!replaced) {
+          newStrokes.push(...action.before);
+        }
+
+        this._strokes = newStrokes;
+        changedIds = Array.from(
+          new Set([...action.before.map((s) => s.id), ...action.after.map((s) => s.id)])
+        );
+        break;
+      }
+      case 'clear': {
+        this._strokes = [...action.strokes];
+        changedIds = action.strokes.map((s) => s.id);
+        break;
+      }
     }
 
     this._redoStack.push(action);
-    this._notify();
+    this._version += 1;
+
+    this._notify({
+      action: { type: 'undo', revertedAction: action },
+      changedStrokeIds: changedIds,
+      version: this._version,
+    });
+
+    return true;
   }
 
-  redo(): void {
+  /**
+   * Redoes the most recently undone action.
+   */
+  public redo(): boolean {
     const action = this._redoStack.pop();
-    if (!action) return;
+    if (!action) return false;
+
+    let changedIds: string[] = [];
 
     switch (action.type) {
-      case 'add':
-        this._strokes.push(action.stroke);
+      case 'add': {
+        this._strokes = [...this._strokes, action.stroke];
+        changedIds = [action.stroke.id];
         break;
-      case 'remove':
-        this._strokes = this._strokes.filter(s => !action.strokeIds.includes(s.id));
+      }
+      case 'remove': {
+        const removeIds = new Set(action.strokes.map((s) => s.id));
+        this._strokes = this._strokes.filter((s) => !removeIds.has(s.id));
+        changedIds = action.strokes.map((s) => s.id);
         break;
-      case 'clear':
+      }
+      case 'replace': {
+        const beforeIds = new Set(action.before.map((s) => s.id));
+        const newStrokes: Stroke[] = [];
+        let replaced = false;
+
+        for (const stroke of this._strokes) {
+          if (beforeIds.has(stroke.id)) {
+            if (!replaced) {
+              newStrokes.push(...action.after);
+              replaced = true;
+            }
+          } else {
+            newStrokes.push(stroke);
+          }
+        }
+
+        if (!replaced) {
+          newStrokes.push(...action.after);
+        }
+
+        this._strokes = newStrokes;
+        changedIds = Array.from(
+          new Set([...action.before.map((s) => s.id), ...action.after.map((s) => s.id)])
+        );
+        break;
+      }
+      case 'clear': {
+        const clearedIds = action.strokes.map((s) => s.id);
         this._strokes = [];
+        changedIds = clearedIds;
         break;
+      }
     }
 
     this._undoStack.push(action);
-    this._notify();
+    this._version += 1;
+
+    this._notify({
+      action: { type: 'redo', appliedAction: action },
+      changedStrokeIds: changedIds,
+      version: this._version,
+    });
+
+    return true;
   }
 
-  /** Get stroke at a given point (for eraser). Returns the topmost stroke. */
-  getStrokeAt(x: number, y: number, radius: number = 10): Stroke | null {
-    for (let i = this._strokes.length - 1; i >= 0; i--) {
-      const stroke = this._strokes[i];
-      for (const p of stroke.points) {
-        const dx = p.x - x;
-        const dy = p.y - y;
-        if (dx * dx + dy * dy < radius * radius) {
-          return stroke;
-        }
-      }
+  private _pushUndoAction(action: StrokeAction): void {
+    this._undoStack.push(action);
+    if (this._undoStack.length > StrokeStore.MAX_HISTORY) {
+      this._undoStack.shift();
     }
-    return null;
   }
 
-  /** Pixel eraser: remove points near (x,y) from all strokes. Splits strokes if needed. */
-  eraseAt(x: number, y: number, radius: number = 10): void {
-    const affected: string[] = [];
-    const newStrokes: Stroke[] = [];
-
-    for (const stroke of this._strokes) {
-      const remaining = stroke.points.filter(p => {
-        const dx = p.x - x;
-        const dy = p.y - y;
-        return dx * dx + dy * dy >= radius * radius;
-      });
-
-      if (remaining.length === stroke.points.length) {
-        newStrokes.push(stroke);
-      } else if (remaining.length > 0) {
-        affected.push(stroke.id);
-        // Keep the surviving points as a new stroke
-        newStrokes.push({
-          ...stroke,
-          id: generateStrokeId(),
-          points: remaining,
-        });
-      } else {
-        affected.push(stroke.id);
-      }
-    }
-
-    if (affected.length > 0) {
-      const oldStrokes = [...this._strokes];
-      this._strokes = newStrokes;
-      this._pushUndo({ type: 'clear', strokes: oldStrokes });
-      this._notify();
+  private _notify(event: StrokeStoreEvent): void {
+    for (const listener of this._listeners) {
+      listener(event);
     }
   }
 }

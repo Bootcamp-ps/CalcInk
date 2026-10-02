@@ -1,55 +1,79 @@
-// ─── Stroke Data Model ─────────────────────────────────────────────
-// Pure data model — no rendering logic here.
+// strokeModel.ts — Point, Stroke, BoundingBox types and helpers (FR-9)
+import type { Point, Stroke } from '../contract';
 
-export interface Point {
-  x: number;
-  y: number;
-  pressure: number;
-  timestamp: number;
-}
-
-export interface Stroke {
-  id: string;
-  points: Point[];
-  width: number;
-  color: string;
-}
+export type { Point, Stroke };
 
 export interface BoundingBox {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-export function getStrokeBounds(stroke: Stroke): BoundingBox | null {
-  if (stroke.points.length === 0) return null;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+export function getStrokeBounds(stroke: Stroke): BoundingBox {
+  if (!stroke.points || stroke.points.length === 0) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0, x: 0, y: 0, width: 0, height: 0 };
+  }
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
   for (const p of stroke.points) {
     if (p.x < minX) minX = p.x;
     if (p.y < minY) minY = p.y;
     if (p.x > maxX) maxX = p.x;
     if (p.y > maxY) maxY = p.y;
   }
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    x: minX,
+    y: minY,
+    width: Math.max(0, maxX - minX),
+    height: Math.max(0, maxY - minY),
+  };
 }
 
-export function getGroupBounds(strokes: Stroke[]): BoundingBox | null {
-  if (strokes.length === 0) return null;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const stroke of strokes) {
-    const b = getStrokeBounds(stroke);
-    if (!b) continue;
-    if (b.x < minX) minX = b.x;
-    if (b.y < minY) minY = b.y;
-    if (b.x + b.width > maxX) maxX = b.x + b.width;
-    if (b.y + b.height > maxY) maxY = b.y + b.height;
+export function getGroupBounds(strokes: Stroke[]): BoundingBox {
+  if (!strokes || strokes.length === 0) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0, x: 0, y: 0, width: 0, height: 0 };
   }
-  if (minX === Infinity) return null;
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-}
 
-let _nextId = 0;
-export function generateStrokeId(): string {
-  return `s_${Date.now()}_${_nextId++}`;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const stroke of strokes) {
+    for (const p of stroke.points) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+
+  if (minX === Infinity) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0, x: 0, y: 0, width: 0, height: 0 };
+  }
+
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    x: minX,
+    y: minY,
+    width: Math.max(0, maxX - minX),
+    height: Math.max(0, maxY - minY),
+  };
 }

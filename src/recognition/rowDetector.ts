@@ -20,15 +20,22 @@ export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 3
   for (const group of groups) {
     let added = false;
     for (const cluster of yClusters) {
-      const clusterTop = Math.min(...cluster.map(g => g.bounds.top));
-      const clusterBottom = Math.max(...cluster.map(g => g.bounds.bottom));
+      const clusterTop = Math.min(...cluster.map(g => g.bounds.y));
+      const clusterBottom = Math.max(...cluster.map(g => g.bounds.y + g.bounds.height));
       const clusterHeight = clusterBottom - clusterTop;
       
-      const overlapY = Math.min(group.bounds.bottom, clusterBottom) - Math.max(group.bounds.top, clusterTop);
+      const overlapY = Math.min(group.bounds.y + group.bounds.height, clusterBottom) - Math.max(group.bounds.y, clusterTop);
       const minHeight = Math.min(group.bounds.height, clusterHeight);
       
-      // If overlap is more than 30% of the shorter height, they are on the same row
-      if (minHeight > 0 && overlapY / minHeight > 0.3) {
+      const clusterCenterY = clusterTop + clusterHeight / 2;
+      const groupCenterY = group.bounds.y + group.bounds.height / 2;
+      const centerDist = Math.abs(clusterCenterY - groupCenterY);
+
+      // Same row if overlap is > 20% or if center is vertically close to row center
+      if (
+        (minHeight > 0 && overlapY / minHeight > 0.2) ||
+        centerDist < Math.max(clusterHeight * 0.7, 35)
+      ) {
         cluster.push(group);
         added = true;
         break;
@@ -43,18 +50,18 @@ export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 3
   const rows: Row[] = [];
   
   for (const cluster of yClusters) {
-    cluster.sort((a, b) => a.bounds.left - b.bounds.left);
+    cluster.sort((a, b) => a.bounds.x - b.bounds.x);
     
     // Calculate average width of symbols in this cluster
     let totalWidth = 0;
     for (const g of cluster) totalWidth += g.bounds.width;
     const avgWidth = cluster.length > 0 ? totalWidth / cluster.length : 0;
     
-    let currentSubRow: SymbolGroup[] = [cluster[0]];
+    let currentSubRow: SymbolGroup[] = [cluster[0]!];
     for (let i = 1; i < cluster.length; i++) {
-      const prev = cluster[i - 1];
-      const curr = cluster[i];
-      const gap = curr.bounds.left - prev.bounds.right;
+      const prev = cluster[i - 1]!;
+      const curr = cluster[i]!;
+      const gap = curr.bounds.x - (prev.bounds.x + prev.bounds.width);
       
       // Dynamic gap threshold based on average symbol width (minimum 50px)
       const dynamicThreshold = Math.max(50, avgWidth * xGapThresholdRatio);
@@ -82,7 +89,7 @@ export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 3
   }
   
   // 3. Sort all final rows from top to bottom
-  rows.sort((a, b) => a.bounds.top - b.bounds.top);
+  rows.sort((a, b) => a.bounds.y - b.bounds.y);
   
   return rows;
 }

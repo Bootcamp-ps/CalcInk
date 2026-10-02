@@ -89,10 +89,8 @@ export function getStrokePath(stroke: Stroke): Path2D {
  */
 export function renderCommittedStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   const path = getStrokePath(stroke);
-  ctx.save();
   ctx.fillStyle = stroke.color;
   ctx.fill(path);
-  ctx.restore();
 }
 
 /**
@@ -101,7 +99,9 @@ export function renderCommittedStroke(ctx: CanvasRenderingContext2D, stroke: Str
  */
 export function renderAllStrokes(ctx: CanvasRenderingContext2D, strokes: readonly Stroke[]): void {
   for (const stroke of strokes) {
-    renderCommittedStroke(ctx, stroke);
+    const path = getStrokePath(stroke);
+    ctx.fillStyle = stroke.color;
+    ctx.fill(path);
   }
 }
 
@@ -122,8 +122,6 @@ export function renderLiveStroke(
   const svgPath = outlineToSvgPath(outline);
   const path = new Path2D(svgPath);
 
-  ctx.save();
   ctx.fillStyle = color;
   ctx.fill(path);
-  ctx.restore();
 }

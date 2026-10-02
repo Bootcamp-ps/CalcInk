@@ -2,15 +2,14 @@
 // Orchestrates: group strokes → detect rows → cache → special symbol → preprocess → worker → parser
 // Handles debouncing, row caching (dirty-region optimization), and worker lifecycle.
 
-import { Stroke } from '../canvas/strokeModel';
+import { Stroke, RowResult as ContractRowResult } from '../contract';
 import { groupStrokesIntoSymbols, SymbolGroup } from './symbolGrouper';
 import { detectRows, Row } from './rowDetector';
 import { preprocessSymbol } from './preprocess';
 import { detectSpecialSymbol } from './specialSymbols';
-import { parseMath } from '../parser';
+import { evaluateTokens as parseMath } from '../parser';
 
-export interface RowResult {
-  rowId: string;
+export interface RowResult extends ContractRowResult {
   tokens: string[];
   confidences: number[];
   groups: SymbolGroup[];
@@ -18,10 +17,12 @@ export interface RowResult {
   bounds: Row['bounds'];
 }
 
-type WorkerCallback = (results: RowResult[] | null, error?: string) => void;
-
 interface RowCache {
   rowId: string;
+  version: number;
+  symbols: ContractRowResult['symbols'];
+  expression: string;
+  evaluation: ContractRowResult['evaluation'];
   strokeIds: Set<string>;
   tokens: string[];
   confidences: number[];
@@ -70,16 +71,16 @@ export class RecognitionPipeline {
     this.rowCacheMap.clear();
   }
 
-  recognize(strokes: readonly Stroke[], callback: WorkerCallback): void {
+  recognize(strokes: readonly Stroke[], version: number, callback: (results: RowResult[]) => void): void {
     if (this.debounceTimer) {
       clearTimeout(this.debounceTimer);
     }
     this.debounceTimer = setTimeout(() => {
-      this._runRecognition([...strokes], callback);
+      this._runRecognition([...strokes], version, callback);
     }, this.debounceMs);
   }
 
-  private async _runRecognition(strokes: Stroke[], callback: WorkerCallback): Promise<void> {
+  private async _runRecognition(strokes: Stroke[], version: number, callback: (results: RowResult[]) => void): Promise<void> {
     if (strokes.length === 0) {
       this.rowCacheMap.clear();
       callback([]);
@@ -87,8 +88,6 @@ export class RecognitionPipeline {
     }
 
     // 1. Full group & row detection
-    // (Optimization: we could map new strokes to cached rows, but for simplicity
-    // and robustness we re-group all strokes into rows, and match them against cache by stable stroke IDs).
     const allGroups = groupStrokesIntoSymbols(strokes);
     const rows = detectRows(allGroups);
 
@@ -101,6 +100,7 @@ export class RecognitionPipeline {
     // 2. Identify dirty rows vs cached rows
     for (let r = 0; r < rows.length; r++) {
       const row = rows[r];
+      if (!row) continue;
       // Generate a deterministic signature for the row based on its stroke IDs
       const strokeIds = new Set(row.groups.flatMap(g => g.strokes.map(s => s.id)));
       const signature = Array.from(strokeIds).sort().join('|');
@@ -111,6 +111,10 @@ export class RecognitionPipeline {
         newCacheMap.set(signature, cached);
         rowResults.push({
           rowId: cached.rowId,
+          version,
+          symbols: cached.symbols,
+          expression: cached.expression,
+          evaluation: cached.evaluation,
           tokens: cached.tokens,
           confidences: cached.confidences,
           groups: cached.groups,
@@ -124,7 +128,7 @@ export class RecognitionPipeline {
         const confidences: number[] = new Array(row.groups.length).fill(0);
         
         for (let g = 0; g < row.groups.length; g++) {
-          const group = row.groups[g];
+          const group = row.groups[g]!;
           const special = detectSpecialSymbol(group);
           if (special) {
             tokens[g] = special.token;
@@ -142,6 +146,10 @@ export class RecognitionPipeline {
         
         const newRowResult: RowResult = {
           rowId,
+          version,
+          symbols: [],
+          expression: '',
+          evaluation: { ok: false, error: 'NO_EQUALS' },
           tokens,
           confidences,
           groups: row.groups,
@@ -152,6 +160,10 @@ export class RecognitionPipeline {
         
         newCacheMap.set(signature, {
           rowId,
+          version,
+          symbols: [],
+          expression: '',
+          evaluation: { ok: false, error: 'NO_EQUALS' },
           strokeIds,
           tokens,
           confidences,
@@ -190,23 +202,49 @@ export class RecognitionPipeline {
       const workerRes = await inferencePromise;
       if (workerRes) {
         for (let i = 0; i < pendingIndices.length; i++) {
-          const { rowIndex, groupIndex } = pendingIndices[i];
-          rowResults[rowIndex].tokens[groupIndex] = workerRes.tokens[i] ?? '?';
-          rowResults[rowIndex].confidences[groupIndex] = workerRes.confidences[i] ?? 0;
+          const { rowIndex, groupIndex } = pendingIndices[i]!;
+          rowResults[rowIndex]!.tokens[groupIndex] = workerRes.tokens[i] ?? '?';
+          rowResults[rowIndex]!.confidences[groupIndex] = workerRes.confidences[i] ?? 0;
         }
       }
     }
 
-    // 4. Parse math per row
-    for (const rowRes of rowResults) {
+    // 4. Parse math per row and populate ContractRowResult fields
+    for (let r = 0; r < rowResults.length; r++) {
+      const rowRes = rowResults[r]!;
+      rowRes.version = version;
+      rowRes.symbols = rowRes.groups.map((g, idx) => ({
+        label: rowRes.tokens[idx] ?? '',
+        confidence: rowRes.confidences[idx] ?? 0,
+        strokeIds: g.strokes.map(s => s.id),
+      }));
+      rowRes.expression = rowRes.tokens.join('');
+
       if (rowRes.tokens.length > 0 && rowRes.tokens[rowRes.tokens.length - 1] === '=') {
         const parseResult = parseMath(rowRes.tokens);
         if (parseResult.ok) {
           rowRes.result = parseResult.value.toString();
+          rowRes.evaluation = { ok: true, value: parseResult.value };
         } else {
-          rowRes.result = '?';
+          rowRes.result = parseResult.error === 'DIV_ZERO' ? 'Undefined' : '?';
+          rowRes.evaluation = {
+            ok: false,
+            error: parseResult.error === 'DIV_ZERO' ? 'DIV_ZERO' : 'SYNTAX',
+          };
         }
+      } else {
+        rowRes.result = null;
+        rowRes.evaluation = { ok: false, error: 'NO_EQUALS' };
       }
+
+      console.log(`%c[CalcInk Recognition] Row ${r + 1}: "${rowRes.expression}" -> ${rowRes.result ?? '(waiting for =)'}`,
+        'background: #1e293b; color: #38bdf8; font-weight: bold; padding: 2px 6px; border-radius: 4px;',
+        {
+          tokens: rowRes.tokens,
+          confidences: rowRes.confidences.map(c => `${Math.round(c * 100)}%`),
+          evaluation: rowRes.evaluation,
+        }
+      );
     }
 
     callback(rowResults);

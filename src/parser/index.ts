@@ -29,7 +29,9 @@ export function tokenize(input: string): Token[] | { error: string } {
   const src = input.trim();
 
   while (i < src.length) {
-    const ch = normalizeChar(src[i]);
+    const rawChar = src[i];
+    if (!rawChar) break;
+    const ch = normalizeChar(rawChar);
 
     if (ch === ' ') { i++; continue; }
 
@@ -37,7 +39,9 @@ export function tokenize(input: string): Token[] | { error: string } {
       let num = '';
       let hasDot = false;
       while (i < src.length) {
-        const c = normalizeChar(src[i]);
+        const rawC = src[i];
+        if (!rawC) break;
+        const c = normalizeChar(rawC);
         if (c >= '0' && c <= '9') { num += c; i++; }
         else if (c === '.' && !hasDot) { hasDot = true; num += c; i++; }
         else break;
@@ -59,7 +63,7 @@ export function tokenize(input: string): Token[] | { error: string } {
     if (ch === ')') { tokens.push({ kind: 'RPAREN', value: ')' }); i++; continue; }
     if (ch === '=') { tokens.push({ kind: 'EQUALS', value: '=' }); i++; continue; }
 
-    return { error: `Unexpected character "${src[i]}"` };
+    return { error: `Unexpected character "${rawChar}"` };
   }
 
   tokens.push({ kind: 'EOF', value: '' });
@@ -83,11 +87,11 @@ class Parser {
   }
 
   private peek(): Token {
-    return this.tokens[this.pos];
+    return this.tokens[this.pos] ?? { kind: 'EOF', value: '' };
   }
 
   private advance(): Token {
-    const t = this.tokens[this.pos];
+    const t = this.tokens[this.pos] ?? { kind: 'EOF', value: '' };
     this.pos++;
     return t;
   }

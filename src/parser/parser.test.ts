@@ -14,8 +14,8 @@ describe('Tokenizer', () => {
     const tokens = tokenize('3.14+2.5');
     expect(Array.isArray(tokens)).toBe(true);
     if (Array.isArray(tokens)) {
-      expect(tokens[0].value).toBe('3.14');
-      expect(tokens[2].value).toBe('2.5');
+      expect(tokens[0]?.value).toBe('3.14');
+      expect(tokens[2]?.value).toBe('2.5');
     }
   });
 

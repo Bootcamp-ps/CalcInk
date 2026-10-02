@@ -1,0 +1,6 @@
+[    -349ms] [ERROR] WebSocket connection to 'ws://localhost:5173/?token=wyxL3MqKiaP3' failed:  @ http://localhost:5173/@vite/client:535
+[      40ms] SyntaxError: Failed to construct 'WebSocket': The URL 'ws://localhost:undefined/?token=wyxL3MqKiaP3' is invalid.
+    at setupWebSocket (http://localhost:5173/@vite/client:536:19)
+    at fallback (http://localhost:5173/@vite/client:509:16)
+    at WebSocket.<anonymous> (http://localhost:5173/@vite/client:555:7)
+[     549ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/chunk-PJEEZAML.js?v=215d638d:21550

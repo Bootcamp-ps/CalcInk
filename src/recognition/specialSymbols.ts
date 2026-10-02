@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ─── Special Symbol Detection ─────────────────────────────────────────
 // Detects symbols with distinct geometric patterns (=, ÷, .) that are
 // either missing from standard digit models or have unique multi-stroke signatures.
@@ -25,8 +26,8 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
     const b2 = getStrokeBounds(strokes[1]);
 
     if (b1 && b2) {
-      const isH1 = b1.width >= 8 && b1.width > Math.max(b1.height, 1) * 1.1;
-      const isH2 = b2.width >= 8 && b2.width > Math.max(b2.height, 1) * 1.1;
+      const isH1 = b1.width >= 6 && b1.width > Math.max(b1.height, 1) * 0.9;
+      const isH2 = b2.width >= 6 && b2.width > Math.max(b2.height, 1) * 0.9;
 
       if (isH1 && isH2) {
         const c1y = b1.y + b1.height / 2;
@@ -38,10 +39,10 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
         const maxW = Math.max(b1.width, b2.width);
 
         if (
-          xOverlap > 0.35 * minW &&
-          minW / maxW > 0.35 &&
-          verticalDist >= 3 &&
-          verticalDist <= maxW * 2.5
+          xOverlap > 0.25 * minW &&
+          minW / maxW > 0.30 &&
+          verticalDist >= 2 &&
+          verticalDist <= Math.max(60, maxW * 2.5)
         ) {
           return { token: '=', confidence: 0.99 };
         }

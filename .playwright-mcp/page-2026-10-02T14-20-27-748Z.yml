@@ -1,0 +1,30 @@
+- generic [ref=f5e3]:
+  - navigation "Drawing tools" [ref=f5e4]:
+    - generic [aria-hidden]: CalcInk
+    - group "Tools" [ref=f5e6]:
+      - button "Pen" [pressed] [ref=f5e7] [cursor=pointer]
+      - button "Eraser" [ref=f5e11] [cursor=pointer]
+      - button "Pixel" [ref=f5e16] [cursor=pointer]
+    - group "History" [ref=f5e22]:
+      - button "Undo" [disabled] [ref=f5e23]
+      - button "Redo" [disabled] [ref=f5e27]
+      - button "Clear canvas" [disabled] [ref=f5e31]
+    - group "Paper" [ref=f5e37]:
+      - button "Paper" [ref=f5e39] [cursor=pointer]
+    - group "Pen options" [ref=f5e44]:
+      - group "Stroke width" [ref=f5e45]:
+        - group "Width presets" [ref=f5e46]:
+          - button "Width fine" [ref=f5e47] [cursor=pointer]
+          - button "Width medium" [pressed] [ref=f5e49] [cursor=pointer]
+          - button "Width bold" [ref=f5e51] [cursor=pointer]
+        - generic [ref=f5e53]:
+          - generic [ref=f5e54]: Pen width
+          - slider "Pen width 2.5px" [ref=f5e55] [cursor=pointer]: "2.5"
+          - generic [aria-hidden] [ref=f5e56]: "2.5"
+      - group "Ink colour" [ref=f5e57]:
+        - button "Ink colour 1 (selected)" [pressed] [ref=f5e58] [cursor=pointer]
+        - button "Ink colour 2" [ref=f5e61] [cursor=pointer]
+        - button "Ink colour 3" [ref=f5e62] [cursor=pointer]
+        - button "Ink colour 4" [ref=f5e63] [cursor=pointer]
+        - button "Ink colour 5" [ref=f5e64] [cursor=pointer]
+  - main [ref=f5e65]

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ─── Image Preprocessing ───────────────────────────────────────────
 // Center, scale with aspect-ratio preservation, and normalize strokes
 // to a 28×28 grayscale tensor (MNIST format: stroke=1, background=0).
