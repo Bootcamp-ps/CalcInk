@@ -123,8 +123,19 @@ export const App: React.FC = () => {
           if (row.result) {
             const pos = calculateResultPosition(row.groups, row.tokens);
             if (pos) {
+              // Option 3: Calculate dynamic font size based on average symbol height
+              let totalHeight = 0;
+              for (const group of row.groups) {
+                totalHeight += group.bounds.height;
+              }
+              const averageHeight = row.groups.length > 0 ? totalHeight / row.groups.length : 30;
+              
+              // Scale it slightly (1.2x) and clamp it between 20px and 80px for safety
+              const rawFontSize = averageHeight * 1.2;
+              const dynamicFontSize = Math.min(Math.max(rawFontSize, 20), 80);
+
               const isError = row.result === '?' || row.result.includes('error');
-              renderResult(octx, overlayCanvas, row.result, pos, isError ? 28 : 36);
+              renderResult(octx, overlayCanvas, row.result, pos, isError ? Math.max(20, dynamicFontSize * 0.8) : dynamicFontSize);
             }
           }
         }

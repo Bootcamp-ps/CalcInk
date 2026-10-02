@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import { App } from './App';
 import './styles/variables.css';
 
 // Self-hosted fonts — offline-safe, OFL licence via npm (@fontsource).
