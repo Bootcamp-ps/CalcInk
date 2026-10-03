@@ -162,7 +162,7 @@ export function useCanvasInput({
         currentTool,
         toolStore.eraserRadius
       );
-      pendingEraserPointsRef.current = [coords];
+      pendingEraserPointsRef.current = [{ x: coords.x, y: coords.y }];
       scheduleRaf();
     }
   };
@@ -197,7 +197,7 @@ export function useCanvasInput({
     } else {
       for (const evt of rawEvents) {
         const coords = eventToPageCoords(evt.clientX, evt.clientY, rect);
-        pendingEraserPointsRef.current.push(coords);
+        pendingEraserPointsRef.current.push({ x: coords.x, y: coords.y });
       }
     }
 
@@ -290,6 +290,7 @@ export function useCanvasInput({
   };
 
   return {
+    isInteractingRef,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
