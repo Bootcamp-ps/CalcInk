@@ -1,6 +1,0 @@
-[     523ms] [ERROR] WebSocket connection to 'ws://localhost:5173/?token=wyxL3MqKiaP3' failed:  @ http://localhost:5173/@vite/client:535
-[     528ms] SyntaxError: Failed to construct 'WebSocket': The URL 'ws://localhost:undefined/?token=wyxL3MqKiaP3' is invalid.
-    at setupWebSocket (http://localhost:5173/@vite/client:536:19)
-    at fallback (http://localhost:5173/@vite/client:509:16)
-    at WebSocket.<anonymous> (http://localhost:5173/@vite/client:555:7)
-[    1084ms] The requested module '/src/App.tsx' does not provide an export named 'App'
