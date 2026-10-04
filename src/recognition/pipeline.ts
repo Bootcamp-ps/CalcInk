@@ -7,7 +7,7 @@ import { groupStrokesIntoSymbols, SymbolGroup } from './symbolGrouper';
 import { detectRows, Row } from './rowDetector';
 import { preprocessSymbol } from './preprocess';
 import { detectSpecialSymbol } from './specialSymbols';
-import { evaluateTokens as parseMath } from '../parser';
+import { evaluateTokens as parseMath, resetEnv } from '../parser';
 
 export interface RowResult extends ContractRowResult {
   tokens: string[];
@@ -69,6 +69,7 @@ export class RecognitionPipeline {
 
   public clearCache(): void {
     this.rowCacheMap.clear();
+    resetEnv(); // Clear variable memory when canvas is cleared
   }
 
   recognize(strokes: readonly Stroke[], version: number, callback: (results: RowResult[]) => void): void {
@@ -83,6 +84,7 @@ export class RecognitionPipeline {
   private async _runRecognition(strokes: Stroke[], version: number, callback: (results: RowResult[]) => void): Promise<void> {
     if (strokes.length === 0) {
       this.rowCacheMap.clear();
+      resetEnv(); // Clear variable memory too
       callback([]);
       return;
     }

@@ -170,7 +170,7 @@ class Parser {
     return this.advance();
   }
 
-  parse(env: Record<string, number> = {}): ParseResult {
+  parse(env: Record<string, number> = {}, varName?: string): ParseResult {
     try {
       const lhs = this.expression(env);
       
@@ -180,11 +180,12 @@ class Parser {
           // e.g. "2x + 4 =" -> we must evaluate LHS if possible.
           // If lhs has variables and we didn't substitute, it's not a scalar.
           if (lhs.coeffs.length > 1) {
-            // Solve LHS = 0 ? Or just error out?
-            // "evaluates expressions with atmost one variable" - if it's 2x+4=0
+            // Solve LHS = 0 ?
             if (lhs.coeffs.length === 2) {
               const x = -lhs.coeffs[0] / lhs.coeffs[1];
-              return { ok: true, value: Math.round(x * 1e10) / 1e10 };
+              const finalVal = Math.round(x * 1e10) / 1e10;
+              if (varName) env[varName] = finalVal;
+              return { ok: true, value: finalVal };
             }
             return { ok: false, error: 'Cannot evaluate variable expression without value' };
           }
@@ -192,29 +193,35 @@ class Parser {
         } else {
           // LHS = RHS
           const rhs = this.expression(env);
+          
+          // Skip optional trailing '='
+          if (this.peek().kind === 'EQUALS') this.advance();
+
           if (this.peek().kind !== 'EOF') throw new Error(`Unexpected token "${this.peek().value}"`);
           
           const eq = lhs.sub(rhs); // eq = 0
           if (eq.coeffs.length === 1) {
             // e.g. 5 = 5 or 5 = 3
-            if (Math.abs(eq.coeffs[0]) < 1e-10) return { ok: true, value: 0 }; // True identity, return 0 (or anything)
+            if (Math.abs(eq.coeffs[0]) < 1e-10) return { ok: true, value: 0 }; // True identity
             return { ok: false, error: 'No solution' };
           }
+          let root: number;
           if (eq.coeffs.length === 2) {
             // c0 + c1*x = 0 -> x = -c0 / c1
-            const x = -eq.coeffs[0] / eq.coeffs[1];
-            return { ok: true, value: Math.round(x * 1e10) / 1e10 };
-          }
-          if (eq.coeffs.length === 3) {
+            root = -eq.coeffs[0] / eq.coeffs[1];
+          } else if (eq.coeffs.length === 3) {
             // c0 + c1*x + c2*x^2 = 0
             const a = eq.coeffs[2], b = eq.coeffs[1], c = eq.coeffs[0];
             const det = b * b - 4 * a * c;
             if (det < 0) return { ok: false, error: 'No real solution' };
             // Return largest root for now
-            const root = (-b + Math.sqrt(det)) / (2 * a);
-            return { ok: true, value: Math.round(root * 1e10) / 1e10 };
+            root = (-b + Math.sqrt(det)) / (2 * a);
+          } else {
+            return { ok: false, error: 'Polynomial degree too high' };
           }
-          return { ok: false, error: 'Polynomial degree too high' };
+          const finalVal = Math.round(root * 1e10) / 1e10;
+          if (varName) env[varName] = finalVal;
+          return { ok: true, value: finalVal };
         }
       }
 
@@ -289,24 +296,66 @@ class Parser {
 
 let globalEnv: Record<string, number> = {};
 
+/** Reset stored variables (e.g. on canvas clear) */
+export function resetEnv(): void {
+  globalEnv = {};
+}
+
+/**
+ * Detect which single variable (if any) appears in the token list.
+ * Returns variable name, or null if none or more than one.
+ */
+function findVariable(tokens: Token[]): string | null {
+  const vars = [...new Set(tokens.filter(t => t.kind === 'VAR').map(t => t.value))];
+  return vars.length === 1 ? vars[0]! : null;
+}
+
+/**
+ * Parse and evaluate a math expression string.
+ *
+ * Mode 1 — EQUATION SOLVE  (LHS = RHS, both sides non-empty, contains variable):
+ *   e.g. "2x+4=10",  "x(x-1)=6"
+ *   → Solves for the variable, stores the result in env, returns the solved value.
+ *
+ * Mode 2 — EXPRESSION EVALUATE  (trailing "=" or no "="):
+ *   e.g. "2x+5=" where x was previously stored.
+ *   → Substitutes variables from env, evaluates, returns the number.
+ *
+ * NEVER throws.
+ */
 export function evaluate(input: string, env: Record<string, number> = globalEnv): ParseResult {
   if (!input || !input.trim()) return { ok: false, error: 'Empty expression' };
+
   const tokens = tokenize(input);
   if ('error' in tokens) return { ok: false, error: tokens.error };
-  const parser = new Parser(tokens);
-  
-  // If it's a simple assignment like "x = 5" or "x = 2+3"
-  // Let's check tokens: [VAR, EQUALS, ...expr...]
-  if (tokens.length >= 4 && tokens[0].kind === 'VAR' && tokens[1].kind === 'EQUALS') {
-    const varName = tokens[0].value;
-    const subParser = new Parser(tokens.slice(2));
-    const res = subParser.parse(env);
-    if (res.ok) {
-      env[varName] = res.value;
-      return { ok: true, value: res.value };
+
+  const eofIdx = tokens.findIndex(t => t.kind === 'EOF');
+  const nonEofTokens = tokens.slice(0, eofIdx === -1 ? tokens.length : eofIdx);
+  const eqIdx = nonEofTokens.findIndex(t => t.kind === 'EQUALS');
+
+  // Anything meaningful after the first '='?
+  const afterEq = eqIdx !== -1
+    ? nonEofTokens.slice(eqIdx + 1).filter(t => t.kind !== 'EQUALS')
+    : [];
+  const isTwoSided = eqIdx !== -1 && afterEq.length > 0;
+
+  // ── Mode 1: EQUATION SOLVE ───────────────────────────────────────────
+  if (isTwoSided) {
+    const varName = findVariable(nonEofTokens);
+    const parser = new Parser(tokens);
+    const result = parser.parse(env, varName ?? undefined);
+    if (result.ok && varName !== null) {
+      env[varName] = result.value;
     }
+    return result;
   }
 
+  // ── Mode 2: EXPRESSION EVALUATE ──────────────────────────────────────
+  const varName = findVariable(nonEofTokens);
+  if (varName !== null && !(varName in env)) {
+    return { ok: false, error: `Variable '${varName}' is not defined` };
+  }
+  const parser = new Parser(tokens);
   return parser.parse(env);
 }
 
