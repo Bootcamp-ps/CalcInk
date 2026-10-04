@@ -210,6 +210,7 @@ export class RecognitionPipeline {
     }
 
     // 4. Parse math per row and populate ContractRowResult fields
+    const env: Record<string, number> = {};
     for (let r = 0; r < rowResults.length; r++) {
       const rowRes = rowResults[r]!;
       rowRes.version = version;
@@ -221,7 +222,7 @@ export class RecognitionPipeline {
       rowRes.expression = rowRes.tokens.join('');
 
       if (rowRes.tokens.length > 0 && rowRes.tokens[rowRes.tokens.length - 1] === '=') {
-        const parseResult = parseMath(rowRes.tokens);
+        const parseResult = parseMath(rowRes.tokens, env);
         if (parseResult.ok) {
           rowRes.result = parseResult.value.toString();
           rowRes.evaluation = { ok: true, value: parseResult.value };
