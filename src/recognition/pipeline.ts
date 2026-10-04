@@ -223,16 +223,17 @@ export class RecognitionPipeline {
       }));
       rowRes.expression = rowRes.tokens.join('');
 
-      if (rowRes.tokens.length > 0 && rowRes.tokens[rowRes.tokens.length - 1] === '=') {
+      const hasEquals = rowRes.tokens.includes('=');
+      if (rowRes.tokens.length > 0 && hasEquals) {
         const parseResult = parseMath(rowRes.tokens, env);
         if (parseResult.ok) {
           rowRes.result = parseResult.value.toString();
           rowRes.evaluation = { ok: true, value: parseResult.value };
         } else {
-          rowRes.result = parseResult.error === 'DIV_ZERO' ? 'Undefined' : '?';
+          rowRes.result = parseResult.error === 'Undefined' ? 'Undefined' : '?';
           rowRes.evaluation = {
             ok: false,
-            error: parseResult.error === 'DIV_ZERO' ? 'DIV_ZERO' : 'SYNTAX',
+            error: parseResult.error ?? 'SYNTAX',
           };
         }
       } else {
