@@ -133,14 +133,13 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
           
           if (Math.abs(dist) > maxSagitta) maxSagitta = Math.abs(dist);
 
-          // dy > 0 means drawing downwards
-          if (dy > 0) {
-            if (cross > 0) leftBows++;
-            else if (cross < 0) rightBows++;
-          } else {
-            // drawing upwards
-            if (cross < 0) leftBows++;
-            else if (cross > 0) rightBows++;
+          // In canvas coords (y downwards):
+          // If cross * dy < 0, the point bows to the left -> "("
+          // If cross * dy > 0, the point bows to the right -> ")"
+          if (cross * dy < 0) {
+            leftBows++;
+          } else if (cross * dy > 0) {
+            rightBows++;
           }
         }
 
