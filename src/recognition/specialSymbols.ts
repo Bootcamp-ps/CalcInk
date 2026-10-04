@@ -144,8 +144,20 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
         }
 
         const totalPoints = stroke.points.length;
-        // Needs a noticeable bow
-        if (maxSagitta > b.width * 0.15 && maxSagitta > 2) {
+        
+        // Find distance of the middle point to the chord
+        // For a bracket `)` or `(`, the middle should be near the peak (maxSagitta).
+        // For a `3`, the middle is a cusp that dips back to the chord!
+        const midIdx = Math.floor(totalPoints / 2);
+        const midP = stroke.points[midIdx];
+        const midCross = (midP.x - p0.x) * dy - (midP.y - p0.y) * dx;
+        const midDist = Math.abs(midCross / chordLen);
+
+        // Conditions:
+        // 1. maxSagitta > chordLen * 0.08 avoids wobbly "1" or "|"
+        // 2. midDist > maxSagitta * 0.5 avoids "3" (where middle dips to 0)
+        // 3. majority of points bow to one side
+        if (maxSagitta > chordLen * 0.08 && maxSagitta > 2 && midDist > maxSagitta * 0.5) {
           if (leftBows > totalPoints * 0.8) {
             return { token: '(', confidence: 0.95 };
           }
