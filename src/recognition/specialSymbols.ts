@@ -143,21 +143,27 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
           }
         }
 
+        // To reject '3', 'E', 'B', or any shape with a "middle twist or spike":
+        // We project every point onto the chord. In the middle 50% of the stroke longitudinally
+        // (projection from 0.25 to 0.75), a true bracket should remain bowed outwards.
+        // If it dips back towards the chord, it's a twist/cusp.
+        let minMiddleDist = Infinity;
+        for (const p of stroke.points) {
+          const proj = ((p.x - p0.x) * dx + (p.y - p0.y) * dy) / (chordLen * chordLen);
+          if (proj >= 0.25 && proj <= 0.75) {
+            const cross = (p.x - p0.x) * dy - (p.y - p0.y) * dx;
+            const dist = Math.abs(cross / chordLen);
+            if (dist < minMiddleDist) minMiddleDist = dist;
+          }
+        }
+
         const totalPoints = stroke.points.length;
         
-        // Find distance of the middle point to the chord
-        // For a bracket `)` or `(`, the middle should be near the peak (maxSagitta).
-        // For a `3`, the middle is a cusp that dips back to the chord!
-        const midIdx = Math.floor(totalPoints / 2);
-        const midP = stroke.points[midIdx];
-        const midCross = (midP.x - p0.x) * dy - (midP.y - p0.y) * dx;
-        const midDist = Math.abs(midCross / chordLen);
-
         // Conditions:
         // 1. maxSagitta > chordLen * 0.08 avoids wobbly "1" or "|"
-        // 2. midDist > maxSagitta * 0.5 avoids "3" (where middle dips to 0)
+        // 2. minMiddleDist > maxSagitta * 0.4 rejects "3", "E" (middle dips back to the chord)
         // 3. majority of points bow to one side
-        if (maxSagitta > chordLen * 0.08 && maxSagitta > 2 && midDist > maxSagitta * 0.5) {
+        if (maxSagitta > chordLen * 0.08 && maxSagitta > 2 && minMiddleDist > maxSagitta * 0.4) {
           if (leftBows > totalPoints * 0.8) {
             return { token: '(', confidence: 0.95 };
           }
