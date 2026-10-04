@@ -80,11 +80,81 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
     }
   }
 
-  // ─── 3. Decimal Point ".": single tiny dot ───
+  // ─── 4. Brackets and Slash: Single stroke ───
   if (strokes.length === 1) {
-    const b = getStrokeBounds(strokes[0]);
-    if (b && b.width <= 12 && b.height <= 12 && strokes[0].points.length <= 6) {
+    const stroke = strokes[0];
+    const b = getStrokeBounds(stroke);
+    
+    // Decimal Point "."
+    if (b && b.width <= 15 && b.height <= 15 && stroke.points.length <= 10) {
       return { token: '.', confidence: 0.96 };
+    }
+
+    if (b && stroke.points.length >= 3) {
+      const p0 = stroke.points[0];
+      const pn = stroke.points[stroke.points.length - 1];
+      
+      const dx = pn.x - p0.x;
+      const dy = pn.y - p0.y;
+      const chordLen = Math.sqrt(dx * dx + dy * dy);
+      
+      // Slash "/"
+      // High aspect ratio, diagonal top-right to bottom-left (or bottom-left to top-right)
+      if (b.height > b.width * 1.2 && chordLen > 15) {
+        // Check if points are mostly collinear
+        let maxDist = 0;
+        let sumDist = 0;
+        for (const p of stroke.points) {
+          const cross = Math.abs((p.x - p0.x) * dy - (p.y - p0.y) * dx);
+          const dist = cross / chordLen;
+          if (dist > maxDist) maxDist = dist;
+          sumDist += dist;
+        }
+        const avgDist = sumDist / stroke.points.length;
+        
+        // Negative slope in math coords, but in canvas (y down), top-right to bottom-left means:
+        // x decreases as y increases -> dx < 0 when dy > 0, so dx * dy < 0
+        if (dx * dy < 0 && maxDist < b.width * 0.3 && avgDist < b.width * 0.15) {
+          return { token: '÷', confidence: 0.95 }; // Map slash to division token
+        }
+      }
+
+      // Brackets "(" and ")"
+      // Must be taller than wide
+      if (b.height > b.width * 1.2 && chordLen > 15) {
+        let leftBows = 0;
+        let rightBows = 0;
+        let maxSagitta = 0;
+
+        for (const p of stroke.points) {
+          // Cross product to find side of chord
+          const cross = (p.x - p0.x) * dy - (p.y - p0.y) * dx;
+          const dist = cross / chordLen;
+          
+          if (Math.abs(dist) > maxSagitta) maxSagitta = Math.abs(dist);
+
+          // dy > 0 means drawing downwards
+          if (dy > 0) {
+            if (cross > 0) leftBows++;
+            else if (cross < 0) rightBows++;
+          } else {
+            // drawing upwards
+            if (cross < 0) leftBows++;
+            else if (cross > 0) rightBows++;
+          }
+        }
+
+        const totalPoints = stroke.points.length;
+        // Needs a noticeable bow
+        if (maxSagitta > b.width * 0.15 && maxSagitta > 2) {
+          if (leftBows > totalPoints * 0.8) {
+            return { token: '(', confidence: 0.95 };
+          }
+          if (rightBows > totalPoints * 0.8) {
+            return { token: ')', confidence: 0.95 };
+          }
+        }
+      }
     }
   }
 
