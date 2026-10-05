@@ -51,12 +51,12 @@ flowchart LR
     A["User draws<br/>on canvas"] --> B["Stroke Store<br/>(state)"]
     B --> C["Symbol Grouper<br/>(segmentation)"]
     C --> D{"Special<br/>symbol?"}
-    D -- "Yes (=, ÷, .)" --> E["Rule-based<br/>token"]
+    D -- "Yes (=, ÷, x, (, ), /)" --> E["Rule-based<br/>token"]
     D -- "No" --> F["Preprocessor<br/>(stroke → tensor)"]
     F --> G["Web Worker<br/>(MobileNetV2 CNN)"]
     G --> H["Tokens<br/>array"]
     E --> H
-    H --> I["Math Parser<br/>(recursive descent)"]
+    H --> I["Algebraic Parser<br/>(recursive descent + Polynomial)"]
     I --> J["Result Renderer<br/>(overlay canvas)"]
 ```
 
@@ -333,26 +333,52 @@ This is generous enough to capture `=` signs drawn with wide spacing, and `÷` w
 
 ### 3.3 Step 2 — Special Symbol Detection (Rule-Based Bypass)
 
-> Source: [`specialSymbols.ts`](file:///f:/Coding/projects/bootcamp%20fully%20AI/src/recognition/specialSymbols.ts)
+> Source: [`specialSymbols.ts`](file:///D:/CodePlayground/Projects/bootcamp/CalcInk/src/recognition/specialSymbols.ts)
 
-Before sending any symbol to the neural network, each `SymbolGroup` is tested against **three hand-coded geometric rules**. If a rule matches, the token is emitted directly (confidence: 0.96–0.99) and the group is never sent to the model.
+Before sending any symbol to the neural network, each `SymbolGroup` is tested against **geometric rules**. If a rule matches, the token is emitted directly (confidence: 0.92–0.99) and the group is never sent to the model. This is the primary defence against CNN misclassification for symbols the model handles poorly.
 
-| Symbol | Stroke count | Detection rule |
-|---|---|---|
-| **`=`** | Exactly 2 | Both strokes are **horizontal** (width > 1.1× height, width ≥ 8px), vertically separated (3px ≤ gap ≤ 2.5× max-width), horizontally overlapping (> 35% of narrower), similar width (ratio > 0.35) |
-| **`÷`** | Exactly 3 | Widest stroke is a horizontal bar (width ≥ 10px, > 1.3× height). Other two strokes are small (< 70% of bar width/height). One is above bar midline, one below. |
-| **`.`** | Exactly 1 | Bounding box ≤ 12×12 px AND ≤ 6 points |
+#### Two-stroke symbols
+
+| Symbol | Detection rule |
+|---|---|
+| **`x`** | Exactly 2 strokes. One has a **`\` diagonal** direction (`dx·dy > 0`), the other a **`/` diagonal** (`dx·dy < 0`). Their bounding boxes must overlap by ≥ 20% of the smaller stroke's minimum dimension in both axes — i.e. they cross each other. Checked **before** `=` so crossing diagonals are never misread as equals. |
+| **`=`** | Exactly 2 strokes, both **horizontal** (width ≥ 6px, width > 0.9× height), vertically separated (gap ≥ 2px), horizontally overlapping (> 25% of narrower width), similar widths (ratio > 0.30). |
+
+#### Three-stroke symbols
+
+| Symbol | Detection rule |
+|---|---|
+| **`÷`** | Exactly 3 strokes. Widest stroke is a horizontal bar (width ≥ 10px, > 1.3× height). Other two are small (< 70% of bar dimension). One centroid above bar midline, one below. |
+
+#### Single-stroke symbols
+
+| Symbol | Detection rule |
+|---|---|
+| **`.`** | Bounding box ≤ 15×15 px AND ≤ 10 points. |
+| **`/` → `÷`** | Height > 1.5× width. Chord direction is `/` (top-right to bottom-left: `dx·dy < 0`). Max deviation from the chord < 12% of chord length, average < 6%. Emits `÷`. |
+| **`(`** | Height > 1.5× width. Chord is mostly **vertical** (horizontal-to-vertical ratio < 0.5). All points bow to the **left** of the chord (> 80% of points). Max sagitta > 8% of chord length. Minimum sagitta in the middle 50% of the stroke is > 40% of max sagitta (rejects `3`, `E`, `B` which dip back to the chord in the middle). |
+| **`)`** | Same as `(` but all points bow to the **right**. |
+
+**`diagonalSign()` helper:**
+A private utility function returns `+1` for a `\`-diagonal stroke (start→end has `dx·dy > 0`), `-1` for `/`-diagonal, and `0` for strokes that are too horizontal, too vertical, or too short (< 5px in either axis) to classify.
+
+**Why `x` before `=`:**
+Both are 2-stroke symbols. The `x` check runs first. If both strokes are diagonal and crossing, it returns `x` immediately. Only if that fails does the `=` check run (which requires both strokes to be horizontal).
+
+**Middle-twist rejection for brackets:**
+A `3`, `E`, or `B` drawn vertically also looks like a right-bowing arc until you inspect its interior. For brackets, we project all points onto the start→end chord and find the **minimum** sagitta (outward distance from chord) among all points in the middle 50% of the chord length. For a true bracket this stays high; for a `3` the middle of the stroke curls back inward, making this minimum collapse to ~0. The test `minMiddleSagitta > maxSagitta * 0.4` efficiently rejects those cases.
 
 **Why rule-based for these symbols?**
 
-1. **`=` is not in the original Irfan model** (17 classes: 0–9, +, -, ×, ÷, (, ), .) and is also not reliable in the Sagyam model since it's labeled as `Equals` but trained on a different visual representation.
-2. **`÷` has a unique 3-stroke structure** (bar + 2 dots) that is trivially detectable geometrically and would be hard for a single-symbol classifier that expects one coherent glyph.
-3. **`.` (decimal point)** is just a dot — the model might confuse it with noise or a very small digit. Geometric detection (small bounding box, few points) is 100% reliable.
-
-**Trade-off: False positives.**
-Two short horizontal strokes that happen to be vertically aligned will be detected as `=` even if the user intended something else. This is mitigated by the tight constraints (width > 1.1× height, similar widths, etc.), but misdetection is possible for unusual writing styles.
+1. **`=`** is unreliable in the CNN (ambiguous training labels).
+2. **`÷`** has a unique 3-stroke structure that is trivially geometric.
+3. **`.`** is too small for the 100×100 CNN input to be meaningful.
+4. **`(`, `)`** are entirely absent from the CNN's 19-class output — rule-based is the only option.
+5. **`x`** is the primary variable letter. The CNN maps its `X` class to `x`, but accuracy is poor (often confused with `3`). Geometric detection of crossing diagonals is far more reliable.
+6. **`/`** (slash-as-division) is absent from the CNN vocabulary; single-stroke detection fills the gap.
 
 ---
+
 
 ### 3.4 Step 3 — Image Preprocessing (Stroke → Tensor)
 
@@ -483,12 +509,12 @@ Without this, `tf.loadLayersModel` would throw "Unknown regularizer: L2".
 | 13 | `Equals` | `=` |
 | 14 | `Multiply` | `×` |
 | 15 | `Minus` | `-` |
-| 16 | `X` | `×` |
+| 16 | `X` | `x` *(variable)* |
 | 17 | `Y` | `y` |
 | 18 | `Z` | `z` |
 
 > [!NOTE]
-> `X` (index 16) is mapped to `×` (multiplication), not the letter "x". This is because the model was trained on math expressions where "X" typically means multiply.
+> `X` (index 16) was previously mapped to `×` (multiplication). It is now mapped to the lowercase variable letter `x`. In practice, the geometric `x` detector in `specialSymbols.ts` intercepts correctly drawn `x` symbols before they even reach the CNN, so the CNN path is a fallback for ambiguous cases.
 
 **MobileNetV2 backbone structure** (simplified):
 ```
@@ -523,46 +549,115 @@ MobileNetV2 is ~2.3M params for a 19-class problem that could theoretically be s
 
 ## 5. Math Parsing & Evaluation
 
-> Source: [`parser/index.ts`](file:///f:/Coding/projects/bootcamp%20fully%20AI/src/parser/index.ts)
+> Source: [`parser/index.ts`](file:///D:/CodePlayground/Projects/bootcamp/CalcInk/src/parser/index.ts)
+
+The parser has been upgraded from a simple scalar evaluator to a **full algebraic evaluator** that supports single-variable expressions, implicit multiplication, and linear/quadratic equation solving.
 
 ### 5.1 Tokenizer
 
-The tokenizer converts a string of recognized characters into a stream of typed tokens:
+The tokenizer converts a string of recognised characters into a stream of typed tokens:
 
 ```typescript
-type TokenKind = 'NUMBER' | 'PLUS' | 'MINUS' | 'MUL' | 'DIV' | 'LPAREN' | 'RPAREN' | 'EQUALS' | 'EOF';
+type TokenKind = 'NUMBER' | 'VAR' | 'PLUS' | 'MINUS' | 'MUL' | 'DIV'
+               | 'LPAREN' | 'RPAREN' | 'EQUALS' | 'EOF';
 ```
 
 **Character normalization** happens first:
+
 | Input | Normalized to |
 |---|---|
 | `×`, `*` | `*` |
 | `÷`, `/` | `/` |
 | `−` (em-dash), `–` (en-dash) | `-` |
+| any letter `a`–`z`, `A`–`Z` | `VAR` token (lowercased) |
 
-**Multi-digit number assembly**: Consecutive digits and at most one `.` are coalesced into a single `NUMBER` token. For example, the tokens `['1', '8']` joined as `"18"` become one `NUMBER(18)`.
+**Multi-digit number assembly**: Consecutive digits and at most one `.` are coalesced into a single `NUMBER` token. `['1','8']` → `NUMBER(18)`.
 
-**Error handling**: Unknown characters produce an immediate error return `{ error: 'Unexpected character "X"' }`.
+**Implicit multiplication injection**: After tokenizing, a `MUL` token is automatically inserted between adjacent tokens where multiplication is implied:
 
-### 5.2 Recursive-Descent Parser
+| Left token | Right token | Example |
+|---|---|---|
+| `NUMBER` | `VAR` | `2x` → `2 × x` |
+| `NUMBER` | `LPAREN` | `2(x+3)` → `2 × (x+3)` |
+| `RPAREN` | `VAR` | `(x+1)x` → `(x+1) × x` |
+| `RPAREN` | `LPAREN` | `(a)(b)` → `(a) × (b)` |
+| `RPAREN` | `NUMBER` | `(x+1)2` → `(x+1) × 2` |
+| `VAR` | `LPAREN` | `x(x+1)` → `x × (x+1)` |
 
-The parser implements a **classic recursive-descent** evaluator that directly computes the numeric result during parsing (no AST construction).
+### 5.2 Polynomial Algebra
 
-**Grammar (EBNF):**
+Instead of evaluating to a plain `number`, sub-expressions evaluate to a **`Polynomial`** — an array of coefficients:
+
+```
+Polynomial([c0, c1, c2, ...]) = c0 + c1·x + c2·x² + ...
+```
+
+| Expression | Polynomial |
+|---|---|
+| `4` | `[4]` |
+| `x` | `[0, 1]` |
+| `2x + 4` | `[4, 2]` |
+| `x² - x` | `[0, -1, 1]` |
+
+The `Polynomial` class supports `add`, `sub`, `mul`, `div` (division by constant only). This allows the parser to carry variable expressions symbolically through the full BODMAS tree.
+
+### 5.3 Two-Mode Evaluation
+
+The public `evaluate(input, env)` function **auto-detects** which mode applies by inspecting the token stream:
+
+#### Mode 1 — Equation Solve (LHS = RHS)
+
+**Trigger**: An `=` token exists in the token list AND there are non-equals tokens after it (i.e. both sides are non-empty).
+
+**Examples**: `2x+4=10`, `3x-2=x+6`, `x(x-1)=6`
+
+**Behaviour**:
+1. Parse the full expression as a polynomial equation: `LHS − RHS = 0`
+2. Solve for the single variable:
+   - **Linear** (`c0 + c1·x = 0`): `x = −c0 / c1`
+   - **Quadratic** (`c0 + c1·x + c2·x² = 0`): quadratic formula, returns the larger root
+3. **Store** the solved value in `env[varName]` for use by subsequent rows
+4. Return the solved value as the answer
+
+#### Mode 2 — Expression Evaluate (trailing `=` or no `=`)
+
+**Trigger**: No `=` token, or `=` is the last meaningful token.
+
+**Examples**: `2x+5=` (x was solved on a previous row), `3+4=`, `18+4×3=`
+
+**Behaviour**:
+1. If the expression contains a variable, look it up in `env`. If not found, return `{ ok: false, error: "Variable 'x' is not defined" }`.
+2. Substitute the stored value into the polynomial and evaluate to a scalar.
+3. Return the numeric result.
+
+```
+Row 1: "2x+4=10"  → Mode 1 → solves x=3, stores env.x=3, displays "3"
+Row 2: "2x+5="    → Mode 2 → substitutes x=3 → 2·3+5 = 11, displays "11"
+Row 3: "3+4="     → Mode 2 → no variable → 7, displays "7"
+```
+
+### 5.4 Variable Environment (`env`)
+
+```typescript
+let globalEnv: Record<string, number> = {};
+export function resetEnv(): void { globalEnv = {}; }
+```
+
+- A plain `Record<string, number>` dictionary maps variable names to solved values.
+- The pipeline creates a **fresh local `env` object per recognition run**, then passes it sequentially to each row's `parseMath()` call — so row 1's solution is visible to row 2, row 2's to row 3, and so on (top-to-bottom order).
+- `resetEnv()` is called by the pipeline on **canvas clear** and when strokes drop to zero, wiping all variable memory.
+- The `globalEnv` singleton is the default for standalone calls to `evaluate()` (e.g. from tests), but the pipeline always passes its own local `env`.
+
+### 5.5 Operator Precedence & Grammar
+
+Grammar (EBNF) — unchanged from before:
+
 ```
 expression = term (('+' | '-') term)*
 term       = unary (('*' | '/') unary)*
 unary      = ('-')* primary
-primary    = NUMBER | '(' expression ')'
+primary    = NUMBER | VAR | '(' expression ')'
 ```
-
-**Key behaviors:**
-- **Trailing `=`**: The parser skips an optional `EQUALS` token at the end (since CalcInk uses `=` as a "compute" trigger, not as an assignment operator).
-- **Division by zero**: Sets a `divByZero` flag and returns `{ ok: false, error: 'Undefined' }` instead of `Infinity` or `NaN`.
-- **Floating-point rounding**: Results are rounded to 10 decimal places (`Math.round(val * 1e10) / 1e10`) to eliminate artifacts like `0.1 + 0.2 = 0.30000000000000004`.
-- **Never throws**: All errors are caught and returned as `{ ok: false, error: string }`.
-
-### 5.3 Operator Precedence & Grammar
 
 | Precedence | Operators | Associativity |
 |---|---|---|
@@ -571,21 +666,16 @@ primary    = NUMBER | '(' expression ')'
 | 3 (highest) | Unary `-` | Right |
 | Grouping | `(`, `)` | N/A |
 
-This follows standard BODMAS/PEMDAS rules. The recursive structure naturally handles precedence:
-- `expression` handles `+` and `-` (lowest precedence)
-- `term` handles `×` and `÷` (higher precedence, binds tighter)
-- `unary` handles leading `-` (highest precedence)
-- `primary` handles parenthesized sub-expressions and literal numbers
+**Key behaviours (unchanged):**
+- Division by zero → `{ ok: false, error: 'Undefined' }`
+- Results rounded to 10 decimal places to eliminate float artifacts
+- Never throws — all errors caught and returned as `{ ok: false, error: string }`
 
-**Trade-off: No AST.**
-The parser evaluates directly during parsing. This is simpler and faster, but means we can't inspect or transform the expression tree (e.g., for algebraic simplification or symbolic display). For a calculator, direct evaluation is sufficient.
+**Trade-off: Quadratic returns largest root.**
+When a quadratic equation has two roots, only the larger one is returned. This is a simplification that works for most practical cases. Future work could display both roots.
 
-**Trade-off: `eval()` not used.**
-JavaScript's `eval()` could parse and evaluate any expression in one line. The custom parser was built because:
-1. `eval()` is a security risk (arbitrary code execution)
-2. `eval()` doesn't handle `÷` or `×` symbols
-3. Custom error messages are more helpful
-4. The parser can be extended with domain-specific rules
+**Trade-off: Division by polynomial not supported.**
+`(x+1) / (x-1)` will throw "Cannot divide by variable expression". Only division by constants is allowed (`(x+2) / 3` works fine). This covers all typical single-variable linear/quadratic use cases.
 
 ---
 
@@ -660,7 +750,9 @@ flowchart TB
 4. After 600ms debounce, pipeline runs: group → special detect → preprocess → worker inference
 5. Callback fires with `{ tokens, confidences, groups }`
 6. `setRecognizedTokens(tokens)` updates StatusBar display
-7. If last token is `=`, `evaluateTokens(tokens)` runs the parser
+7. If **any** `=` exists in tokens, `parseMath(tokens, env)` runs the algebraic evaluator:
+   - **LHS = RHS** → solves for the variable, stores in `env`, result is the solved value
+   - **Trailing `=`** → substitutes any stored variables from `env`, evaluates numerically
 8. Result is rendered on `overlay-canvas` via `renderResult()`
 9. Confidence dots are rendered via `renderConfidenceIndicators()`
 
@@ -736,38 +828,51 @@ The codebase ships BOTH runtimes but currently uses only TensorFlow.js:
 ## 10. File Map
 
 ```
-f:/Coding/projects/bootcamp fully AI/
+D:/CodePlayground/Projects/bootcamp/CalcInk/
 ├── index.html                          # Vite entry point
-├── package.json                        # Dependencies (React, TF.js, ONNX RT, Vite)
+├── package.json                        # Dependencies (React, TF.js, Vite)
 ├── vite.config.ts                      # Vite + PWA + Worker configuration
 ├── tsconfig.json                       # TypeScript configuration
 │
 ├── src/
 │   ├── main.tsx                        # React root mount
 │   ├── App.tsx                         # Main component: wires canvas, pipeline, parser
+│   ├── contract.ts                     # Shared types: Stroke, Point, RowResult, AnswerMark
 │   ├── index.css                       # Full design system (glassmorphism, paper theme)
 │   │
 │   ├── canvas/                         # ── Canvas & Stroke Layer ──
 │   │   ├── strokeModel.ts              # Point, Stroke, BoundingBox types + helpers
 │   │   ├── strokeStore.ts              # Reactive store with undo/redo (100-level stack)
-│   │   ├── renderer.ts                 # DPR-aware rendering, quadratic Bézier smoothing
+│   │   ├── inkRenderer.ts              # DPR-aware rendering, quadratic Bézier smoothing
 │   │   └── index.ts                    # Module re-exports
 │   │
 │   ├── recognition/                    # ── Recognition Pipeline ──
-│   │   ├── pipeline.ts                 # Orchestrator: debounce, group, preprocess, worker
+│   │   ├── pipeline.ts                 # Orchestrator: debounce, row cache, group, preprocess,
+│   │   │                               #   worker, env-aware per-row algebraic evaluation
 │   │   ├── symbolGrouper.ts            # Union-Find stroke grouper (4 merge criteria)
-│   │   ├── specialSymbols.ts           # Rule-based =, ÷, . detection
+│   │   ├── specialSymbols.ts           # Rule-based detector: =, ÷, x, (, ), /
+│   │   │                               #   x: two crossing diagonal strokes
+│   │   │                               #   (, ): single arc with middle-twist rejection
+│   │   │                               #   /: straight single-diagonal slash → ÷
+│   │   ├── rowDetector.ts              # Y-overlap clustering of symbol groups into rows
 │   │   ├── preprocess.ts               # Stroke→tensor: OffscreenCanvas, scale, normalize
 │   │   └── index.ts                    # Module re-exports
 │   │
 │   ├── workers/
-│   │   └── recognitionWorker.ts        # Web Worker: TF.js MobileNetV2 + MLP fallback
+│   │   └── recognitionWorker.ts        # Web Worker: TF.js MobileNetV2
+│   │                                   #   SAGYAM_TOKEN_MAP: X → 'x' (variable, not ×)
 │   │
 │   ├── parser/
-│   │   └── index.ts                    # Tokenizer + recursive-descent BODMAS evaluator
+│   │   ├── index.ts                    # Algebraic tokenizer + recursive-descent evaluator
+│   │   │                               #   Polynomial class, implicit multiplication,
+│   │   │                               #   two-mode evaluation (solve / evaluate),
+│   │   │                               #   variable env (resetEnv, findVariable)
+│   │   ├── parser.test.ts              # Original 43 scalar expression tests
+│   │   └── algebra.test.ts             # 10 new algebraic / variable-system tests
 │   │
-│   ├── render/
-│   │   └── index.ts                    # Result text + confidence dots on overlay canvas
+│   ├── overlay/                        # ── Answer Rendering ──
+│   │   ├── answerRenderer.ts           # Answer text + confidence dots on overlay canvas
+│   │   └── index.ts
 │   │
 │   └── components/
 │       ├── Toolbar.tsx                 # Pen/eraser tools, width slider, undo/redo/clear
@@ -775,23 +880,17 @@ f:/Coding/projects/bootcamp fully AI/
 │
 ├── public/
 │   ├── models/
-│   │   ├── sagyam/                     # MobileNetV2 CNN (primary model)
-│   │   │   ├── model.json              # TF.js Layers model topology (104 KB)
-│   │   │   └── group1-shard[1-4]of4.bin # Weight shards (14.4 MB total)
-│   │   ├── weights.bin                 # Irfan MLP weights (64 KB, raw Float32)
-│   │   ├── weights.json                # Irfan MLP weights (JSON format, legacy)
-│   │   ├── model.h5                    # Irfan Keras model (222 KB, legacy)
-│   │   └── math_symbol_classifier.onnx # ONNX export of Irfan model (unused)
-│   └── wasm/                           # ONNX Runtime Web WASM files (unused)
+│   │   └── sagyam/                     # MobileNetV2 CNN (primary model, 19 classes)
+│   │       ├── model.json
+│   │       └── group1-shard[1-4]of4.bin
+│   └── wasm/                           # ONNX Runtime WASM (legacy, unused)
 │
-├── scripts/
-│   ├── create_model.py                 # Creates ONNX model with RANDOM weights (prototyping)
-│   └── convert_model.py                # Converts Irfan h5 → ONNX via PyTorch bridge
-│
-├── model_orig.py                       # Original Irfan Chahyadi Python (reference only)
-├── calculator_orig.py                  # Original Irfan calculator UI (reference only)
-└── utils_orig.py                       # Original Irfan utils (reference only)
+└── docs/
+    ├── PRD_canvas_ux.md                # UX requirements (P0/P1/P2 priorities)
+    └── reference/
+        └── calcink_architecture.md     # This document
 ```
+
 
 ---
 

@@ -41,7 +41,7 @@ const SAGYAM_TOKEN_MAP: Record<string, string> = {
   'Equals': '=',
   'Multiply': '×',
   'Minus': '-',
-  'X': '×',
+  'X': 'x',
   'Y': 'y',
   'Z': 'z'
 };

@@ -7,7 +7,7 @@ import { groupStrokesIntoSymbols, SymbolGroup } from './symbolGrouper';
 import { detectRows, Row } from './rowDetector';
 import { preprocessSymbol } from './preprocess';
 import { detectSpecialSymbol } from './specialSymbols';
-import { evaluateTokens as parseMath } from '../parser';
+import { evaluateTokens as parseMath, resetEnv } from '../parser';
 
 export interface RowResult extends ContractRowResult {
   tokens: string[];
@@ -69,6 +69,7 @@ export class RecognitionPipeline {
 
   public clearCache(): void {
     this.rowCacheMap.clear();
+    resetEnv(); // Clear variable memory when canvas is cleared
   }
 
   recognize(strokes: readonly Stroke[], version: number, callback: (results: RowResult[]) => void): void {
@@ -83,6 +84,7 @@ export class RecognitionPipeline {
   private async _runRecognition(strokes: Stroke[], version: number, callback: (results: RowResult[]) => void): Promise<void> {
     if (strokes.length === 0) {
       this.rowCacheMap.clear();
+      resetEnv(); // Clear variable memory too
       callback([]);
       return;
     }
@@ -210,6 +212,7 @@ export class RecognitionPipeline {
     }
 
     // 4. Parse math per row and populate ContractRowResult fields
+    const env: Record<string, number> = {};
     for (let r = 0; r < rowResults.length; r++) {
       const rowRes = rowResults[r]!;
       rowRes.version = version;
@@ -220,16 +223,17 @@ export class RecognitionPipeline {
       }));
       rowRes.expression = rowRes.tokens.join('');
 
-      if (rowRes.tokens.length > 0 && rowRes.tokens[rowRes.tokens.length - 1] === '=') {
-        const parseResult = parseMath(rowRes.tokens);
+      const hasEquals = rowRes.tokens.includes('=');
+      if (rowRes.tokens.length > 0 && hasEquals) {
+        const parseResult = parseMath(rowRes.tokens, env);
         if (parseResult.ok) {
           rowRes.result = parseResult.value.toString();
           rowRes.evaluation = { ok: true, value: parseResult.value };
         } else {
-          rowRes.result = parseResult.error === 'DIV_ZERO' ? 'Undefined' : '?';
+          rowRes.result = parseResult.error === 'Undefined' ? 'Undefined' : '?';
           rowRes.evaluation = {
             ok: false,
-            error: parseResult.error === 'DIV_ZERO' ? 'DIV_ZERO' : 'SYNTAX',
+            error: parseResult.error ?? 'SYNTAX',
           };
         }
       } else {
