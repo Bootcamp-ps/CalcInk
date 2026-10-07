@@ -139,7 +139,7 @@ function buildBackground(spec: PaperSpec): string {
  * @param spec - The current paper specification.
  */
 export function applyPaperCSS(el: HTMLElement, spec: PaperSpec): void {
-  const { toneSpec } = spec;
+  const { toneSpec, type } = spec;
 
   // CSS custom properties so child elements (toolbar, etc.) can read the tone
   el.style.setProperty('--paper-bg', toneSpec.bg);
@@ -147,5 +147,45 @@ export function applyPaperCSS(el: HTMLElement, spec: PaperSpec): void {
   el.style.setProperty('--paper-line', toneSpec.lineColor);
   el.style.setProperty('--paper-border', toneSpec.borderColor);
   el.style.setProperty('--paper-text', toneSpec.textColor);
-  el.style.background = buildBackground(spec);
+
+  const imageLayers: string[] = [];
+
+  // Layer 1 — grain (topmost)
+  if (GRAIN_TILE) {
+    imageLayers.push(`url("${GRAIN_TILE}")`);
+  }
+
+  // Layer 2 — vignette
+  const vignetteAlpha =
+    toneSpec.family === 'dark' ? 'rgba(0,0,0,0.22)' : 'rgba(0,0,0,0.05)';
+  imageLayers.push(
+    `radial-gradient(ellipse at center, transparent 40%, ${vignetteAlpha} 100%)`
+  );
+
+  // Layer 3 — type-specific pattern
+  if (type === 'ruled') {
+    imageLayers.push(
+      `repeating-linear-gradient(` +
+        `to bottom,` +
+        `transparent 0px,` +
+        `transparent ${RULED_SPACING - 1}px,` +
+        `${toneSpec.lineColor}99 ${RULED_SPACING - 1}px,` +
+        `${toneSpec.lineColor}99 ${RULED_SPACING}px` +
+        `)`
+    );
+  } else if (type === 'dot') {
+    const d = DOT_SPACING;
+    const r = DOT_RADIUS;
+    imageLayers.push(
+      `radial-gradient(circle, ${toneSpec.lineColor}bb ${r}px, transparent ${r + 0.5}px)` +
+        ` ${d}px ${d}px / ${d}px ${d}px`
+    );
+  }
+
+  if (imageLayers.length > 0) {
+    el.style.backgroundImage = imageLayers.join(', ');
+  } else {
+    el.style.backgroundImage = 'none';
+  }
+  el.style.backgroundColor = toneSpec.bg;
 }

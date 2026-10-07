@@ -35,9 +35,11 @@ function App() {
       if (paperRef.current) {
         applyPaperCSS(paperRef.current, paperStore.spec);
       }
-      // Set data-paper-family on the root so the toolbar knows the surface colour
+      // Set data-paper-family and custom properties on the root
       if (appRef.current) {
         appRef.current.dataset['paperFamily'] = paperStore.family;
+        appRef.current.style.setProperty('--paper-bg', paperStore.spec.toneSpec.bg);
+        appRef.current.style.setProperty('--paper-chrome', paperStore.spec.toneSpec.chrome);
       }
     };
     // Apply immediately on mount
