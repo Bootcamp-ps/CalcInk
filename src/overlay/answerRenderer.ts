@@ -69,7 +69,7 @@ export async function renderAnswers(
     const isEquationSolve = isTwoSided && varName !== null && row.evaluation.ok;
 
     // Skip rows with no result (no '=', variable assignments, etc.)
-    if (row.result === null) continue;
+    if (anyRow.result === null) continue;
 
     // Calculate answer string
     let answerText = '';

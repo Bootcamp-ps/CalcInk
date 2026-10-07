@@ -70,7 +70,7 @@ export interface RowResult {
   /** Arithmetic evaluation result. */
   evaluation:
     | { ok: true; value: number; /** BODMAS reduction chain (P2). */ steps?: readonly string[] }
-    | { ok: false; error: 'DIV_ZERO' | 'SYNTAX' | 'NO_EQUALS' };
+    | { ok: false; error: 'DIV_ZERO' | 'SYNTAX' | 'NO_EQUALS' | 'VAR_PENDING' | string };
 }
 
 // ---------------------------------------------------------------------------

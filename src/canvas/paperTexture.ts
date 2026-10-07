@@ -80,7 +80,7 @@ export const GRAIN_TILE: string | null =
  *   3. Ruled lines  OR  dot grid  (type-specific)
  *   4. Solid base colour (bottom)
  */
-function buildBackground(spec: PaperSpec): string {
+export function buildBackground(spec: PaperSpec): string {
   const { toneSpec, type } = spec;
   const layers: string[] = [];
 

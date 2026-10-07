@@ -6,8 +6,14 @@ import { Stroke, RowResult as ContractRowResult } from '../contract';
 import { groupStrokesIntoSymbols, SymbolGroup } from './symbolGrouper';
 import { detectRows, Row } from './rowDetector';
 import { preprocessSymbol } from './preprocess';
-import { detectSpecialSymbol, SpecialSymbolMatch } from './specialSymbols';
+import { detectSpecialSymbol, SpecialSymbolMatch, ENABLE_BRACKET_RULES, setEnableBracketRules } from './specialSymbols';
 import { evaluateTokens as parseMath, resetEnv } from '../parser';
+
+export { ENABLE_BRACKET_RULES, setEnableBracketRules };
+
+if (typeof window !== 'undefined') {
+  (window as any).setEnableBracketRules = setEnableBracketRules;
+}
 
 export interface RowResult extends ContractRowResult {
   tokens: string[];
@@ -215,8 +221,8 @@ export class RecognitionPipeline {
           const cnnConf = workerRes.confidences[i] ?? 0;
 
           if (bracketCandidate) {
-            // Option B: If the CNN model is confident it's a digit (especially '3'), trust the model!
-            if ((cnnToken === '3' && cnnConf >= 0.70) || (cnnConf >= 0.85 && /^[0-9]$/.test(cnnToken))) {
+            // Option B: If the CNN model is confident it's a '3' (which shares a right-bow with ')'), trust the model!
+            if (cnnToken === '3' && cnnConf >= 0.70) {
               rowResults[rowIndex]!.tokens[groupIndex] = cnnToken;
               rowResults[rowIndex]!.confidences[groupIndex] = cnnConf;
             } else {

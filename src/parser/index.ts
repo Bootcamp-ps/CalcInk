@@ -17,7 +17,7 @@ class Polynomial {
   }
 
   trim() {
-    while (this.coeffs.length > 1 && Math.abs(this.coeffs[this.coeffs.length - 1]) < 1e-10) {
+    while (this.coeffs.length > 1 && Math.abs(this.coeffs[this.coeffs.length - 1]!) < 1e-10) {
       this.coeffs.pop();
     }
   }
@@ -44,10 +44,10 @@ class Polynomial {
   }
 
   mul(other: Polynomial): Polynomial {
-    const res = new Array(this.coeffs.length + other.coeffs.length - 1).fill(0);
+    const res: number[] = new Array(this.coeffs.length + other.coeffs.length - 1).fill(0);
     for (let i = 0; i < this.coeffs.length; i++) {
       for (let j = 0; j < other.coeffs.length; j++) {
-        res[i + j] += this.coeffs[i] * other.coeffs[j];
+        res[i + j] = (res[i + j] ?? 0) + (this.coeffs[i] ?? 0) * (other.coeffs[j] ?? 0);
       }
     }
     return new Polynomial(res);
@@ -55,7 +55,7 @@ class Polynomial {
 
   div(other: Polynomial): Polynomial {
     if (other.coeffs.length > 1) throw new Error("Cannot divide by variable expression");
-    const denom = other.coeffs[0];
+    const denom = other.coeffs[0] ?? 0;
     if (Math.abs(denom) < 1e-10) throw new Error("Undefined"); // DIV_ZERO
     return new Polynomial(this.coeffs.map(c => c / denom));
   }
@@ -126,10 +126,12 @@ export function tokenize(input: string): Token[] | { error: string } {
   // Inject implicit multiplication
   const finalTokens: Token[] = [];
   for (let j = 0; j < tokens.length; j++) {
-    finalTokens.push(tokens[j]);
+    const curToken = tokens[j]!;
+    finalTokens.push(curToken);
     if (j < tokens.length - 1) {
-      const current = tokens[j].kind;
-      const next = tokens[j + 1].kind;
+      const nextToken = tokens[j + 1]!;
+      const current = curToken.kind;
+      const next = nextToken.kind;
       const needsMul = 
         (current === 'NUMBER' && (next === 'VAR' || next === 'LPAREN')) ||
         (current === 'RPAREN' && (next === 'VAR' || next === 'LPAREN' || next === 'NUMBER')) ||
@@ -182,14 +184,14 @@ class Parser {
           if (lhs.coeffs.length > 1) {
             // Solve LHS = 0 ?
             if (lhs.coeffs.length === 2) {
-              const x = -lhs.coeffs[0] / lhs.coeffs[1];
+              const x = -(lhs.coeffs[0]!) / (lhs.coeffs[1]!);
               const finalVal = Math.round(x * 1e10) / 1e10;
               if (varName) env[varName] = finalVal;
               return { ok: true, value: finalVal };
             }
             return { ok: false, error: 'Cannot evaluate variable expression without value' };
           }
-          return { ok: true, value: Math.round(lhs.coeffs[0] * 1e10) / 1e10 };
+          return { ok: true, value: Math.round((lhs.coeffs[0]!) * 1e10) / 1e10 };
         } else {
           // LHS = RHS
           const rhs = this.expression(env);
@@ -202,16 +204,16 @@ class Parser {
           const eq = lhs.sub(rhs); // eq = 0
           if (eq.coeffs.length === 1) {
             // e.g. 5 = 5 or 5 = 3
-            if (Math.abs(eq.coeffs[0]) < 1e-10) return { ok: true, value: 0 }; // True identity
+            if (Math.abs(eq.coeffs[0]!) < 1e-10) return { ok: true, value: 0 }; // True identity
             return { ok: false, error: 'No solution' };
           }
           let root: number;
           if (eq.coeffs.length === 2) {
             // c0 + c1*x = 0 -> x = -c0 / c1
-            root = -eq.coeffs[0] / eq.coeffs[1];
+            root = -(eq.coeffs[0]!) / (eq.coeffs[1]!);
           } else if (eq.coeffs.length === 3) {
             // c0 + c1*x + c2*x^2 = 0
-            const a = eq.coeffs[2], b = eq.coeffs[1], c = eq.coeffs[0];
+            const a = eq.coeffs[2]!, b = eq.coeffs[1]!, c = eq.coeffs[0]!;
             const det = b * b - 4 * a * c;
             if (det < 0) return { ok: false, error: 'No real solution' };
             // Return largest root for now
@@ -228,7 +230,7 @@ class Parser {
       if (this.peek().kind !== 'EOF') throw new Error(`Unexpected token "${this.peek().value}"`);
 
       if (lhs.coeffs.length > 1) return { ok: false, error: 'Cannot evaluate variable expression without value' };
-      return { ok: true, value: Math.round(lhs.coeffs[0] * 1e10) / 1e10 };
+      return { ok: true, value: Math.round((lhs.coeffs[0]!) * 1e10) / 1e10 };
 
     } catch (e: unknown) {
       return { ok: false, error: e instanceof Error ? e.message : 'Parse error' };
@@ -280,7 +282,7 @@ class Parser {
     if (t.kind === 'VAR') {
       this.advance();
       if (t.value in env) {
-        return Polynomial.constant(env[t.value]);
+        return Polynomial.constant(env[t.value]!);
       }
       return Polynomial.variable();
     }

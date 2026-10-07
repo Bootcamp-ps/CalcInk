@@ -4,6 +4,15 @@
  * The .page fills the full viewport; the paper layer is inside it.
  */
 
+html, body, #root, .app, .page {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -webkit-touch-callout: none !important;
+  -webkit-user-drag: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+  touch-action: none;
+}
+
 .app {
   display: flex;
   flex-direction: column;

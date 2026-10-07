@@ -59,6 +59,7 @@ function setupTestCanvas() {
           onPointerMove={input.handlePointerMove}
           onPointerUp={input.handlePointerUp}
           onPointerCancel={input.handlePointerCancel}
+          onLostPointerCapture={input.handleLostPointerCapture}
         />
       </div>
     );
@@ -261,5 +262,78 @@ describe('FR-5 Palm rejection & multi-touch handling', () => {
       } as unknown as React.PointerEvent<HTMLCanvasElement>);
     });
     expect(hook.isInteractingRef.current).toBe(false);
+  });
+
+  it('auto-recovers and starts new stroke if previous pointerup was dropped by tablet', () => {
+    const { store, getHook } = setupTestCanvas();
+    const hook = getHook();
+
+    // Pen stroke 1 touches down and moves, but pointerup is NEVER called (dropped by tablet/flick)
+    act(() => {
+      hook.handlePointerDown({
+        pointerId: 40,
+        pointerType: 'pen',
+        clientX: 100,
+        clientY: 100,
+        pressure: 0.8,
+        preventDefault: () => {},
+      } as unknown as React.PointerEvent<HTMLCanvasElement>);
+    });
+    expect(hook.isInteractingRef.current).toBe(true);
+
+    // Pen stroke 2 arrives (pointerId 41). Should auto-commit stroke 1 and immediately begin stroke 2
+    act(() => {
+      hook.handlePointerDown({
+        pointerId: 41,
+        pointerType: 'pen',
+        clientX: 200,
+        clientY: 200,
+        pressure: 0.9,
+        preventDefault: () => {},
+      } as unknown as React.PointerEvent<HTMLCanvasElement>);
+    });
+
+    // Stroke 1 was committed to store
+    expect(store.strokes.length).toBe(1);
+    expect(store.strokes[0]!.points[0]!.x).toBe(100);
+
+    // Stroke 2 is actively drawing (not dropped!)
+    expect(hook.isInteractingRef.current).toBe(true);
+
+    // Finishing stroke 2
+    act(() => {
+      hook.handlePointerUp({
+        pointerId: 41,
+      } as unknown as React.PointerEvent<HTMLCanvasElement>);
+    });
+    expect(hook.isInteractingRef.current).toBe(false);
+    expect(store.strokes.length).toBe(2);
+  });
+
+  it('handles lost pointer capture by committing active stroke', () => {
+    const { store, getHook } = setupTestCanvas();
+    const hook = getHook();
+
+    act(() => {
+      hook.handlePointerDown({
+        pointerId: 50,
+        pointerType: 'pen',
+        clientX: 150,
+        clientY: 150,
+        pressure: 0.7,
+        preventDefault: () => {},
+      } as unknown as React.PointerEvent<HTMLCanvasElement>);
+    });
+    expect(hook.isInteractingRef.current).toBe(true);
+
+    // Browser fires lostpointercapture
+    act(() => {
+      hook.handleLostPointerCapture({
+        pointerId: 50,
+      } as unknown as React.PointerEvent<HTMLCanvasElement>);
+    });
+
+    expect(hook.isInteractingRef.current).toBe(false);
+    expect(store.strokes.length).toBe(1);
   });
 });

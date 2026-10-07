@@ -126,9 +126,15 @@ export function useCanvasInput({
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (e.button !== 0) return;
+    // Suppress browser long-press gestures, context menu, and text selection immediately
+    if (typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
 
     const pointerType = (e.pointerType as 'pen' | 'mouse' | 'touch') || 'mouse';
+
+    // Only mouse strictly requires button 0 (left click). Stylus on mobile/Android can report button -1 or contact.
+    if (pointerType === 'mouse' && e.button !== 0) return;
 
     // FR-5: Palm rejection — once a pen has been seen, ignore touch for drawing; mouse always allowed
     if (pointerType === 'pen') {
@@ -137,8 +143,15 @@ export function useCanvasInput({
       return;
     }
 
-    // Guard against multi-touch / secondary palm touches while already drawing
-    if (isInteractingRef.current) return;
+    // If an interaction was still active (e.g. tablet missed previous pointerup):
+    // If new pointer is touch, ignore it as secondary contact/palm.
+    // If new pointer is pen or mouse, auto-commit the old stroke and proceed with the new one!
+    if (isInteractingRef.current) {
+      if (pointerType === 'touch') {
+        return;
+      }
+      finishInteraction(true, activePointerIdRef.current ?? e.pointerId);
+    }
 
     const liveCanvas = liveCanvasRef.current;
     if (!liveCanvas) return;
@@ -187,6 +200,10 @@ export function useCanvasInput({
     }
 
     if (!isInteractingRef.current || activePointerIdRef.current !== e.pointerId) return;
+
+    if (typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
 
     const liveCanvas = liveCanvasRef.current;
     if (!liveCanvas) return;
@@ -307,6 +324,33 @@ export function useCanvasInput({
     finishInteraction(false, e.pointerId);
   };
 
+  const handleLostPointerCapture = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (isInteractingRef.current && activePointerIdRef.current === e.pointerId) {
+      finishInteraction(true, e.pointerId);
+    }
+  };
+
+  // Listen for pointerup and pointercancel on window so fast flicks/lifts outside canvas are never lost
+  useEffect(() => {
+    const handleGlobalUp = (e: PointerEvent) => {
+      if (isInteractingRef.current && activePointerIdRef.current === e.pointerId) {
+        finishInteraction(true, e.pointerId);
+      }
+    };
+    const handleGlobalCancel = (e: PointerEvent) => {
+      if (isInteractingRef.current && activePointerIdRef.current === e.pointerId) {
+        finishInteraction(false, e.pointerId);
+      }
+    };
+
+    window.addEventListener('pointerup', handleGlobalUp);
+    window.addEventListener('pointercancel', handleGlobalCancel);
+    return () => {
+      window.removeEventListener('pointerup', handleGlobalUp);
+      window.removeEventListener('pointercancel', handleGlobalCancel);
+    };
+  }, []);
+
   return {
     isInteractingRef,
     penSeenRef,
@@ -314,5 +358,6 @@ export function useCanvasInput({
     handlePointerMove,
     handlePointerUp,
     handlePointerCancel,
+    handleLostPointerCapture,
   };
 }

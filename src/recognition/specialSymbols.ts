@@ -12,6 +12,16 @@ export interface SpecialSymbolMatch {
   confidence: number;
 }
 
+/**
+ * Configuration flag: Set to true to enable geometric rule-based classification
+ * of single-stroke brackets '(' and ')'.
+ * Set to false (default) to disable bracket rules and pass strokes directly to the CNN model.
+ */
+export let ENABLE_BRACKET_RULES = false;
+
+export function setEnableBracketRules(enabled: boolean): void {
+  ENABLE_BRACKET_RULES = enabled;
+}
 
 /**
  * Check if a symbol group matches a known rule-based pattern.
@@ -123,38 +133,40 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
       }
     }
 
-    // ── '(' and ')' brackets ─────────────────────────────────────────
-    // 1. Taller than wide and predominantly vertical stroke:
-    const isVertical = Math.abs(dy) > Math.abs(dx) * 1.1;
-    // 2. Open shape (endpoints do not meet like '0', '6', or '8'):
-    const isNonClosed = chordLen >= b.height * 0.65 && Math.abs(dy) >= b.height * 0.60;
+    // ── '(' and ')' brackets (guarded by ENABLE_BRACKET_RULES config flag) ──
+    if (ENABLE_BRACKET_RULES) {
+      // 1. Predominantly vertical stroke (allows natural handheld tablet tilt):
+      const isVertical = Math.abs(dy) > Math.abs(dx) * 0.85;
+      // 2. Open shape (endpoints do not close into a loop like '0', '6', or '8'):
+      const isNonClosed = chordLen >= b.height * 0.45 && Math.abs(dy) >= b.height * 0.40;
 
-    if (b.height >= b.width * 1.05 && isVertical && isNonClosed) {
-      let leftBows = 0;
-      let rightBows = 0;
-      let maxSagitta = 0;
+      if (b.height >= b.width * 0.95 && isVertical && isNonClosed) {
+        let leftBows = 0;
+        let rightBows = 0;
+        let maxSagitta = 0;
 
-      for (const p of stroke.points) {
-        const cross = (p.x - p0.x) * dy - (p.y - p0.y) * dx;
-        const sag = Math.abs(cross / chordLen);
-        if (sag > maxSagitta) maxSagitta = sag;
+        for (const p of stroke.points) {
+          const cross = (p.x - p0.x) * dy - (p.y - p0.y) * dx;
+          const sag = Math.abs(cross / chordLen);
+          if (sag > maxSagitta) maxSagitta = sag;
 
-        // Determine bulge side relative to stroke orientation:
-        // cross * Math.sign(dy) < 0 indicates bulging leftward '('
-        // cross * Math.sign(dy) > 0 indicates bulging rightward ')'
-        const side = cross * Math.sign(dy);
-        if (side < -0.5) leftBows++;
-        else if (side > 0.5) rightBows++;
-      }
+          // Determine bulge side relative to stroke orientation:
+          // cross * Math.sign(dy) < 0 indicates bulging leftward '('
+          // cross * Math.sign(dy) > 0 indicates bulging rightward ')'
+          const side = cross * Math.sign(dy);
+          if (side < -0.5) leftBows++;
+          else if (side > 0.5) rightBows++;
+        }
 
-      // 3. Must have noticeable curvature (rejects straight '1'):
-      const hasCurvature = maxSagitta >= chordLen * 0.05 && maxSagitta >= 2.5;
+        // 3. Must have noticeable curvature (rejects straight '1' hand tremors < 4.5px):
+        const hasCurvature = maxSagitta >= chordLen * 0.09 && maxSagitta >= 4.5;
 
-      // 4. Must bow predominantly in one direction (rejects 'S' or '3'):
-      const totalBowed = leftBows + rightBows;
-      if (hasCurvature && totalBowed > 0) {
-        if (leftBows / totalBowed >= 0.70) return { token: '(', confidence: 0.95 };
-        if (rightBows / totalBowed >= 0.70) return { token: ')', confidence: 0.95 };
+        // 4. Must bow predominantly in one direction (rejects 'S' or '3'):
+        const totalBowed = leftBows + rightBows;
+        if (hasCurvature && totalBowed > 0) {
+          if (leftBows / totalBowed >= 0.65) return { token: '(', confidence: 0.95 };
+          if (rightBows / totalBowed >= 0.65) return { token: ')', confidence: 0.95 };
+        }
       }
     }
   }

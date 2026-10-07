@@ -18,6 +18,7 @@ import { useCanvasDpr } from './useCanvasDpr';
 import { useCanvasInput } from './useCanvasInput';
 import { RecognitionPipeline } from '../recognition/pipeline';
 import { renderAnswers, clearAnswers } from '../overlay/answerRenderer';
+import { RecognitionBar } from '../components/RecognitionBar';
 import './CanvasPage.css';
 
 export interface CanvasPageProps {
@@ -33,6 +34,7 @@ export const CanvasPage: React.FC<CanvasPageProps> = ({ store, toolStore }) => {
   const srOnlyRef = useRef<HTMLDivElement>(null);
 
   const [activeTool, setActiveTool] = useState<ToolType>(toolStore.tool);
+  const [recognizedRows, setRecognizedRows] = useState<readonly RowResult[]>([]);
 
   const latestResultsRef = useRef<readonly RowResult[]>([]);
   const prevAnswersRef = useRef<Map<string, string>>(new Map());
@@ -110,6 +112,7 @@ export const CanvasPage: React.FC<CanvasPageProps> = ({ store, toolStore }) => {
           animRafRef.current = null;
         }
         latestResultsRef.current = [];
+        setRecognizedRows([]);
         prevAnswersRef.current.clear();
         clearAnswers(ctx, width, height);
         if (srOnlyRef.current) srOnlyRef.current.textContent = '';
@@ -123,6 +126,7 @@ export const CanvasPage: React.FC<CanvasPageProps> = ({ store, toolStore }) => {
         }
 
         latestResultsRef.current = results;
+        setRecognizedRows([...results]);
 
         // Diff to identify which rows actually changed or are newly evaluated
         const changedRowIds = new Set<string>();
@@ -192,11 +196,23 @@ export const CanvasPage: React.FC<CanvasPageProps> = ({ store, toolStore }) => {
     };
   }, [store, redrawCommittedCanvas, pipeline, redrawAnswers]);
 
+  // Prevent browser context menu and text selection callouts globally
+  useEffect(() => {
+    const prevent = (e: Event) => e.preventDefault();
+    window.addEventListener('contextmenu', prevent, { capture: true });
+    window.addEventListener('selectstart', prevent, { capture: true });
+    return () => {
+      window.removeEventListener('contextmenu', prevent, { capture: true });
+      window.removeEventListener('selectstart', prevent, { capture: true });
+    };
+  }, []);
+
   const {
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
     handlePointerCancel,
+    handleLostPointerCapture,
   } = useCanvasInput({
     store,
     toolStore,
@@ -207,7 +223,11 @@ export const CanvasPage: React.FC<CanvasPageProps> = ({ store, toolStore }) => {
   });
 
   return (
-    <div className="page-container" ref={containerRef}>
+    <div
+      className="page-container"
+      ref={containerRef}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {/* Layer 1: Stroke canvas (committed strokes) */}
       <canvas ref={strokeCanvasRef} className="canvas-layer stroke-canvas" />
 
@@ -219,6 +239,8 @@ export const CanvasPage: React.FC<CanvasPageProps> = ({ store, toolStore }) => {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
+        onLostPointerCapture={handleLostPointerCapture}
+        onContextMenu={(e) => e.preventDefault()}
       />
 
       {/* Layer 3: Answer canvas (math results drawn next to '=', non-interactive) */}
@@ -226,6 +248,9 @@ export const CanvasPage: React.FC<CanvasPageProps> = ({ store, toolStore }) => {
 
       {/* Accessible screen reader announcement region */}
       <div className="sr-only" ref={srOnlyRef} aria-live="polite" aria-atomic="true" />
+
+      {/* Live recognized tokens inspect tab */}
+      <RecognitionBar rows={recognizedRows as any} />
     </div>
   );
 };
