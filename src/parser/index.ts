@@ -70,7 +70,7 @@ export interface Token {
 }
 
 function normalizeChar(ch: string): string {
-  if (ch === '×' || ch === '*') return '*';
+  if (ch === '×' || ch === '*' || ch === 'x' || ch === 'X') return '*';
   if (ch === '÷' || ch === '/') return '/';
   if (ch === '−' || ch === '–') return '-';
   return ch;

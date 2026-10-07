@@ -1,6 +1,6 @@
 // @ts-nocheck
 // ─── Special Symbol Detection ─────────────────────────────────────────
-// Detects symbols with distinct geometric patterns (=, ÷, ., x, (, ))
+// Detects symbols with distinct geometric patterns (=, ÷, ., (, ))
 // that are either missing from standard digit models or have unique
 // multi-stroke signatures. Runs BEFORE the CNN so it takes priority.
 
@@ -10,25 +10,6 @@ import { SymbolGroup } from './symbolGrouper';
 export interface SpecialSymbolMatch {
   token: string;
   confidence: number;
-}
-
-/**
- * Return +1 if the stroke goes top-left→bottom-right (\),
- *        -1 if it goes top-right→bottom-left (/),
- *         0 if it is too horizontal/vertical/short to classify.
- */
-function diagonalSign(stroke: Stroke): number {
-  const p0 = stroke.points[0];
-  const pn = stroke.points[stroke.points.length - 1];
-  if (!p0 || !pn) return 0;
-  const b = getStrokeBounds(stroke);
-  if (!b || b.width < 5 || b.height < 5) return 0;
-  const dxSign = pn.x - p0.x;
-  const dySign = pn.y - p0.y;
-  const product = dxSign * dySign;
-  if (product > 0) return 1;  // \ diagonal
-  if (product < 0) return -1; // / diagonal
-  return 0;
 }
 
 /**
@@ -45,20 +26,6 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
     const b1 = getStrokeBounds(strokes[0]);
     const b2 = getStrokeBounds(strokes[1]);
     if (!b1 || !b2) return null;
-
-    // ── 'x': two crossing diagonal strokes ───────────────────────────
-    // One goes \ (diagonalSign = +1), other goes / (diagonalSign = -1).
-    // Their bounding boxes must overlap in both axes.
-    const d1 = diagonalSign(strokes[0]);
-    const d2 = diagonalSign(strokes[1]);
-    if (d1 !== 0 && d2 !== 0 && d1 !== d2) {
-      const xOverlap = Math.min(b1.x + b1.width, b2.x + b2.width) - Math.max(b1.x, b2.x);
-      const yOverlap = Math.min(b1.y + b1.height, b2.y + b2.height) - Math.max(b1.y, b2.y);
-      const minDim = Math.min(b1.width, b1.height, b2.width, b2.height);
-      if (xOverlap > minDim * 0.2 && yOverlap > minDim * 0.2) {
-        return { token: 'x', confidence: 0.93 };
-      }
-    }
 
     // ── '=': two horizontal strokes stacked vertically ────────────────
     const isH1 = b1.width >= 6 && b1.width > Math.max(b1.height, 1) * 0.9;
