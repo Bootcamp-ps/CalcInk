@@ -36,6 +36,7 @@ export function useCanvasInput({
   const isInteractingRef = useRef<boolean>(false);
   const activePointerIdRef = useRef<number | null>(null);
   const pointerTypeRef = useRef<'pen' | 'mouse' | 'touch'>('mouse');
+  const penSeenRef = useRef<boolean>(false);
 
   // Pen live stroke points
   const livePointsRef = useRef<Point[]>([]);
@@ -127,6 +128,18 @@ export function useCanvasInput({
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return;
 
+    const pointerType = (e.pointerType as 'pen' | 'mouse' | 'touch') || 'mouse';
+
+    // FR-5: Palm rejection — once a pen has been seen, ignore touch for drawing; mouse always allowed
+    if (pointerType === 'pen') {
+      penSeenRef.current = true;
+    } else if (pointerType === 'touch' && penSeenRef.current) {
+      return;
+    }
+
+    // Guard against multi-touch / secondary palm touches while already drawing
+    if (isInteractingRef.current) return;
+
     const liveCanvas = liveCanvasRef.current;
     if (!liveCanvas) return;
 
@@ -138,7 +151,7 @@ export function useCanvasInput({
 
     isInteractingRef.current = true;
     activePointerIdRef.current = e.pointerId;
-    pointerTypeRef.current = (e.pointerType as 'pen' | 'mouse' | 'touch') || 'mouse';
+    pointerTypeRef.current = pointerType;
 
     const rect = liveCanvas.getBoundingClientRect();
     const coords = eventToPageCoords(e.clientX, e.clientY, rect);
@@ -168,6 +181,11 @@ export function useCanvasInput({
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // Pen hover / move also marks pen as seen
+    if (e.pointerType === 'pen') {
+      penSeenRef.current = true;
+    }
+
     if (!isInteractingRef.current || activePointerIdRef.current !== e.pointerId) return;
 
     const liveCanvas = liveCanvasRef.current;
@@ -291,6 +309,7 @@ export function useCanvasInput({
 
   return {
     isInteractingRef,
+    penSeenRef,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,

@@ -6,7 +6,7 @@ import { Stroke, RowResult as ContractRowResult } from '../contract';
 import { groupStrokesIntoSymbols, SymbolGroup } from './symbolGrouper';
 import { detectRows, Row } from './rowDetector';
 import { preprocessSymbol } from './preprocess';
-import { detectSpecialSymbol } from './specialSymbols';
+import { detectSpecialSymbol, SpecialSymbolMatch } from './specialSymbols';
 import { evaluateTokens as parseMath, resetEnv } from '../parser';
 
 export interface RowResult extends ContractRowResult {
@@ -96,7 +96,7 @@ export class RecognitionPipeline {
     const rows = detectRows(allGroups);
 
     const pendingTensors: Float32Array[] = [];
-    const pendingIndices: { rowIndex: number; groupIndex: number }[] = [];
+    const pendingIndices: { rowIndex: number; groupIndex: number; bracketCandidate?: SpecialSymbolMatch | null }[] = [];
 
     const newCacheMap = new Map<string, RowCache>();
     const rowResults: RowResult[] = [];
@@ -134,11 +134,15 @@ export class RecognitionPipeline {
         for (let g = 0; g < row.groups.length; g++) {
           const group = row.groups[g]!;
           const special = detectSpecialSymbol(group);
-          if (special) {
+          if (special && special.token !== '(' && special.token !== ')') {
             tokens[g] = special.token;
             confidences[g] = special.confidence;
           } else {
-            pendingIndices.push({ rowIndex: r, groupIndex: g });
+            pendingIndices.push({
+              rowIndex: r,
+              groupIndex: g,
+              bracketCandidate: special && (special.token === '(' || special.token === ')') ? special : null,
+            });
             try {
               const tensor = preprocessSymbol(group.strokes, group.bounds, 100, 3);
               pendingTensors.push(tensor);
@@ -206,9 +210,23 @@ export class RecognitionPipeline {
       const workerRes = await inferencePromise;
       if (workerRes) {
         for (let i = 0; i < pendingIndices.length; i++) {
-          const { rowIndex, groupIndex } = pendingIndices[i]!;
-          rowResults[rowIndex]!.tokens[groupIndex] = workerRes.tokens[i] ?? '?';
-          rowResults[rowIndex]!.confidences[groupIndex] = workerRes.confidences[i] ?? 0;
+          const { rowIndex, groupIndex, bracketCandidate } = pendingIndices[i]!;
+          const cnnToken = workerRes.tokens[i] ?? '?';
+          const cnnConf = workerRes.confidences[i] ?? 0;
+
+          if (bracketCandidate) {
+            // Option B: If the CNN model is confident it's a digit (especially '3'), trust the model!
+            if ((cnnToken === '3' && cnnConf >= 0.70) || (cnnConf >= 0.85 && /^[0-9]$/.test(cnnToken))) {
+              rowResults[rowIndex]!.tokens[groupIndex] = cnnToken;
+              rowResults[rowIndex]!.confidences[groupIndex] = cnnConf;
+            } else {
+              rowResults[rowIndex]!.tokens[groupIndex] = bracketCandidate.token;
+              rowResults[rowIndex]!.confidences[groupIndex] = bracketCandidate.confidence;
+            }
+          } else {
+            rowResults[rowIndex]!.tokens[groupIndex] = cnnToken;
+            rowResults[rowIndex]!.confidences[groupIndex] = cnnConf;
+          }
         }
       }
     }
@@ -240,12 +258,15 @@ export class RecognitionPipeline {
 
       if (rowRes.tokens.length > 0 && hasEquals) {
         if (isTwoSided && hasVar) {
-          // Variable assignment (e.g. 4y=16) — solve and store silently, show nothing.
-          // varEnv is always empty at this point (cleared above) so y is never
-          // pre-substituted — no identity-corruption bug possible.
-          parseMath(rowRes.tokens, env);
-          rowRes.result = null;
-          rowRes.evaluation = { ok: false, error: 'VAR_ASSIGN' };
+          // Variable assignment or equation solving (e.g. 4x=16)
+          const parseResult = parseMath(rowRes.tokens, env);
+          if (parseResult.ok) {
+            rowRes.result = parseResult.value.toString();
+            rowRes.evaluation = { ok: true, value: parseResult.value };
+          } else {
+            rowRes.result = null;
+            rowRes.evaluation = { ok: false, error: 'VAR_PENDING' };
+          }
         } else {
           // Non-assignment rows: always parse (may use variables from env)
           const parseResult = parseMath(rowRes.tokens, env);

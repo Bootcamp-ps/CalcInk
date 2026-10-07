@@ -106,8 +106,9 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
     if (chordLen < 15) return null;
 
     // ── '/' slash (→ division) ────────────────────────────────────────
-    // Tall (height > 1.5× width), mostly straight, / direction only
-    if (b.height > b.width * 1.5 && dx * dy < 0) {
+    // Angle between 32° and 75° from horizontal, forward slash orientation (dx * dy < 0), mostly straight
+    const angleDeg = Math.atan2(Math.abs(dy), Math.abs(dx)) * (180 / Math.PI);
+    if (dx * dy < 0 && angleDeg >= 32 && angleDeg <= 75) {
       let maxDev = 0;
       let sumDev = 0;
       for (const p of stroke.points) {
@@ -123,33 +124,37 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
     }
 
     // ── '(' and ')' brackets ─────────────────────────────────────────
-    // Must be tall (height > 1.5× width) AND mostly vertical chord (not diagonal)
-    const chordDiag = Math.abs(dx) / (Math.abs(dy) + 1e-6);
-    if (b.height > b.width * 1.5 && chordDiag < 0.5) {
-      let leftBows = 0, rightBows = 0, maxSagitta = 0;
+    // 1. Taller than wide and predominantly vertical stroke:
+    const isVertical = Math.abs(dy) > Math.abs(dx) * 1.1;
+    // 2. Open shape (endpoints do not meet like '0', '6', or '8'):
+    const isNonClosed = chordLen >= b.height * 0.65 && Math.abs(dy) >= b.height * 0.60;
+
+    if (b.height >= b.width * 1.05 && isVertical && isNonClosed) {
+      let leftBows = 0;
+      let rightBows = 0;
+      let maxSagitta = 0;
+
       for (const p of stroke.points) {
         const cross = (p.x - p0.x) * dy - (p.y - p0.y) * dx;
         const sag = Math.abs(cross / chordLen);
         if (sag > maxSagitta) maxSagitta = sag;
-        if (cross * dy < 0) leftBows++;
-        else if (cross * dy > 0) rightBows++;
+
+        // Determine bulge side relative to stroke orientation:
+        // cross * Math.sign(dy) < 0 indicates bulging leftward '('
+        // cross * Math.sign(dy) > 0 indicates bulging rightward ')'
+        const side = cross * Math.sign(dy);
+        if (side < -0.5) leftBows++;
+        else if (side > 0.5) rightBows++;
       }
 
-      // Reject any shape that dips back towards centre in the middle 50% span
-      let minMiddle = Infinity;
-      for (const p of stroke.points) {
-        const proj = ((p.x - p0.x) * dx + (p.y - p0.y) * dy) / (chordLen * chordLen);
-        if (proj >= 0.25 && proj <= 0.75) {
-          const cross = (p.x - p0.x) * dy - (p.y - p0.y) * dx;
-          const sag = Math.abs(cross / chordLen);
-          if (sag < minMiddle) minMiddle = sag;
-        }
-      }
+      // 3. Must have noticeable curvature (rejects straight '1'):
+      const hasCurvature = maxSagitta >= chordLen * 0.05 && maxSagitta >= 2.5;
 
-      const n = stroke.points.length;
-      if (maxSagitta > chordLen * 0.08 && maxSagitta > 2 && minMiddle > maxSagitta * 0.4) {
-        if (leftBows > n * 0.8) return { token: '(', confidence: 0.95 };
-        if (rightBows > n * 0.8) return { token: ')', confidence: 0.95 };
+      // 4. Must bow predominantly in one direction (rejects 'S' or '3'):
+      const totalBowed = leftBows + rightBows;
+      if (hasCurvature && totalBowed > 0) {
+        if (leftBows / totalBowed >= 0.70) return { token: '(', confidence: 0.95 };
+        if (rightBows / totalBowed >= 0.70) return { token: ')', confidence: 0.95 };
       }
     }
   }
