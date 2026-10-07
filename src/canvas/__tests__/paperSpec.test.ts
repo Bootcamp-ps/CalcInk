@@ -183,11 +183,11 @@ describe('palette index preservation', () => {
 // ---------------------------------------------------------------------------
 
 describe('getDefaultPaperSpec', () => {
-  it('returns a ruled paper spec', () => {
-    // In test environment, window.matchMedia is usually undefined / false
+  it('returns a ruled cream paper spec', () => {
     const spec = getDefaultPaperSpec();
-    expect(['plain', 'ruled', 'dot']).toContain(spec.type);
-    expect(spec.toneSpec).toBeDefined();
+    expect(spec.type).toBe('ruled');
+    expect(spec.toneSpec.tone).toBe('cream');
+    expect(spec.toneSpec.family).toBe('light');
   });
 });
 
