@@ -51,7 +51,7 @@ flowchart LR
     A["User draws<br/>on canvas"] --> B["Stroke Store<br/>(state)"]
     B --> C["Symbol Grouper<br/>(segmentation)"]
     C --> D{"Special<br/>symbol?"}
-    D -- "Yes (=, ÷, x, (, ), /)" --> E["Rule-based<br/>token"]
+    D -- "Yes (=, ÷, (, ), /)" --> E["Rule-based<br/>token"]
     D -- "No" --> F["Preprocessor<br/>(stroke → tensor)"]
     F --> G["Web Worker<br/>(MobileNetV2 CNN)"]
     G --> H["Tokens<br/>array"]
@@ -335,13 +335,12 @@ This is generous enough to capture `=` signs drawn with wide spacing, and `÷` w
 
 > Source: [`specialSymbols.ts`](file:///D:/CodePlayground/Projects/bootcamp/CalcInk/src/recognition/specialSymbols.ts)
 
-Before sending any symbol to the neural network, each `SymbolGroup` is tested against **geometric rules**. If a rule matches, the token is emitted directly (confidence: 0.92–0.99) and the group is never sent to the model. This is the primary defence against CNN misclassification for symbols the model handles poorly.
+Before sending any symbol to the neural network, each `SymbolGroup` is tested against **geometric rules**. If a rule matches, the token is emitted directly (confidence: 0.95–0.99) and the group is never sent to the model. This is the primary defence against CNN misclassification for symbols the model handles poorly.
 
 #### Two-stroke symbols
 
 | Symbol | Detection rule |
 |---|---|
-| **`x`** | Exactly 2 strokes. One has a **`\` diagonal** direction (`dx·dy > 0`), the other a **`/` diagonal** (`dx·dy < 0`). Their bounding boxes must overlap by ≥ 20% of the smaller stroke's minimum dimension in both axes — i.e. they cross each other. Checked **before** `=` so crossing diagonals are never misread as equals. |
 | **`=`** | Exactly 2 strokes, both **horizontal** (width ≥ 6px, width > 0.9× height), vertically separated (gap ≥ 2px), horizontally overlapping (> 25% of narrower width), similar widths (ratio > 0.30). |
 
 #### Three-stroke symbols
@@ -359,12 +358,6 @@ Before sending any symbol to the neural network, each `SymbolGroup` is tested ag
 | **`(`** | Height > 1.5× width. Chord is mostly **vertical** (horizontal-to-vertical ratio < 0.5). All points bow to the **left** of the chord (> 80% of points). Max sagitta > 8% of chord length. Minimum sagitta in the middle 50% of the stroke is > 40% of max sagitta (rejects `3`, `E`, `B` which dip back to the chord in the middle). |
 | **`)`** | Same as `(` but all points bow to the **right**. |
 
-**`diagonalSign()` helper:**
-A private utility function returns `+1` for a `\`-diagonal stroke (start→end has `dx·dy > 0`), `-1` for `/`-diagonal, and `0` for strokes that are too horizontal, too vertical, or too short (< 5px in either axis) to classify.
-
-**Why `x` before `=`:**
-Both are 2-stroke symbols. The `x` check runs first. If both strokes are diagonal and crossing, it returns `x` immediately. Only if that fails does the `=` check run (which requires both strokes to be horizontal).
-
 **Middle-twist rejection for brackets:**
 A `3`, `E`, or `B` drawn vertically also looks like a right-bowing arc until you inspect its interior. For brackets, we project all points onto the start→end chord and find the **minimum** sagitta (outward distance from chord) among all points in the middle 50% of the chord length. For a true bracket this stays high; for a `3` the middle of the stroke curls back inward, making this minimum collapse to ~0. The test `minMiddleSagitta > maxSagitta * 0.4` efficiently rejects those cases.
 
@@ -374,8 +367,7 @@ A `3`, `E`, or `B` drawn vertically also looks like a right-bowing arc until you
 2. **`÷`** has a unique 3-stroke structure that is trivially geometric.
 3. **`.`** is too small for the 100×100 CNN input to be meaningful.
 4. **`(`, `)`** are entirely absent from the CNN's 19-class output — rule-based is the only option.
-5. **`x`** is the primary variable letter. The CNN maps its `X` class to `x`, but accuracy is poor (often confused with `3`). Geometric detection of crossing diagonals is far more reliable.
-6. **`/`** (slash-as-division) is absent from the CNN vocabulary; single-stroke detection fills the gap.
+5. **`/`** (slash-as-division) is absent from the CNN vocabulary; single-stroke detection fills the gap.
 
 ---
 
@@ -509,12 +501,12 @@ Without this, `tf.loadLayersModel` would throw "Unknown regularizer: L2".
 | 13 | `Equals` | `=` |
 | 14 | `Multiply` | `×` |
 | 15 | `Minus` | `-` |
-| 16 | `X` | `x` *(variable)* |
+| 16 | `X` | `×` |
 | 17 | `Y` | `y` |
 | 18 | `Z` | `z` |
 
 > [!NOTE]
-> `X` (index 16) was previously mapped to `×` (multiplication). It is now mapped to the lowercase variable letter `x`. In practice, the geometric `x` detector in `specialSymbols.ts` intercepts correctly drawn `x` symbols before they even reach the CNN, so the CNN path is a fallback for ambiguous cases.
+> `X` (index 16) is mapped to `×` (multiplication). The variable letter `y` (index 17) is used for single-variable algebra and equation solving.
 
 **MobileNetV2 backbone structure** (simplified):
 ```
@@ -850,8 +842,8 @@ D:/CodePlayground/Projects/bootcamp/CalcInk/
 │   │   ├── pipeline.ts                 # Orchestrator: debounce, row cache, group, preprocess,
 │   │   │                               #   worker, env-aware per-row algebraic evaluation
 │   │   ├── symbolGrouper.ts            # Union-Find stroke grouper (4 merge criteria)
-│   │   ├── specialSymbols.ts           # Rule-based detector: =, ÷, x, (, ), /
-│   │   │                               #   x: two crossing diagonal strokes
+│   │   ├── specialSymbols.ts           # Rule-based detector: =, ÷, (, ), /
+│   │   │                               #   =: two parallel horizontal strokes
 │   │   │                               #   (, ): single arc with middle-twist rejection
 │   │   │                               #   /: straight single-diagonal slash → ÷
 │   │   ├── rowDetector.ts              # Y-overlap clustering of symbol groups into rows
@@ -860,7 +852,7 @@ D:/CodePlayground/Projects/bootcamp/CalcInk/
 │   │
 │   ├── workers/
 │   │   └── recognitionWorker.ts        # Web Worker: TF.js MobileNetV2
-│   │                                   #   SAGYAM_TOKEN_MAP: X → 'x' (variable, not ×)
+│   │                                   #   SAGYAM_TOKEN_MAP: X → '×', Y → 'y', Z → 'z'
 │   │
 │   ├── parser/
 │   │   ├── index.ts                    # Algebraic tokenizer + recursive-descent evaluator

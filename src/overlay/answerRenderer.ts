@@ -48,7 +48,10 @@ export async function renderAnswers(
   for (const row of rows) {
     if (!row.evaluation || row.symbols.length === 0) continue;
 
-    // Find the last '=' symbol group
+    // Find '=' in row
+    const eqIdx = row.symbols.findIndex(s => s?.label === '=');
+    if (eqIdx === -1) continue;
+
     let lastEqualIdx = -1;
     for (let i = row.symbols.length - 1; i >= 0; i--) {
       if (row.symbols[i]?.label === '=') {
@@ -56,48 +59,30 @@ export async function renderAnswers(
         break;
       }
     }
-
     if (lastEqualIdx === -1) continue;
 
-    const eqSymbol = row.symbols[lastEqualIdx];
-    if (!eqSymbol) continue;
+    const anyRow = row as any;
+    const afterEqSymbols = row.symbols.slice(eqIdx + 1).filter(s => s?.label && s.label !== '=');
+    const isTwoSided = afterEqSymbols.length > 0;
+    const varSymbol = row.symbols.find(s => /^[a-zA-Z]$/.test(s?.label ?? ''));
+    const varName = varSymbol ? varSymbol.label.toLowerCase() : null;
+    const isEquationSolve = isTwoSided && varName !== null && row.evaluation.ok;
 
     // Calculate answer string
     let answerText = '';
     if (row.evaluation.ok) {
-      answerText = String(row.evaluation.value);
+      if (isEquationSolve) {
+        answerText = `${varName} = ${row.evaluation.value}`;
+      } else {
+        answerText = String(row.evaluation.value);
+      }
     } else if (row.evaluation.error === 'DIV_ZERO') {
       answerText = 'Undefined';
     } else {
       answerText = '?';
     }
 
-    // Determine anchor position safely with full NaN fallbacks:
-    const anyRow = row as any;
-    const eqGroup = anyRow.groups?.[lastEqualIdx];
-    
-    let anchorX = 0;
-    let anchorY = 0;
-
-    const bounds = eqGroup?.bounds || anyRow.bounds;
-    if (bounds) {
-      const maxX = bounds.maxX ?? (bounds.x + bounds.width);
-      const minY = bounds.minY ?? bounds.y;
-      const maxY = bounds.maxY ?? (bounds.y + bounds.height);
-
-      anchorX = (Number.isFinite(maxX) ? maxX : bounds.x + (bounds.width || 0)) + gap;
-      anchorY = Number.isFinite(minY) && Number.isFinite(maxY)
-        ? (minY + maxY) / 2
-        : bounds.y + (bounds.height || 0) / 2;
-    }
-
-    if (!Number.isFinite(anchorX) || !Number.isFinite(anchorY)) {
-      console.warn('[CalcInk:AnswerRenderer] Skipping row: anchor coordinates evaluated to NaN', { row, anchorX, anchorY });
-      continue;
-    }
-
     // ─── 1. DYNAMIC SIZE: Match Handwritten Digits ───────────────────
-    // Extract heights of actual digits or letters in this row to ignore smaller operators
     let referenceHeight = 36;
     if (anyRow.groups && anyRow.groups.length > 0) {
       const digitHeights: number[] = [];
@@ -115,51 +100,91 @@ export async function renderAnswers(
       }
       if (digitHeights.length > 0) {
         digitHeights.sort((a, b) => b - a);
-        // Take the 75th-percentile digit height
         referenceHeight = digitHeights[Math.floor(digitHeights.length * 0.25)] || digitHeights[0]!;
       } else if (allHeights.length > 0) {
         allHeights.sort((a, b) => b - a);
         referenceHeight = allHeights[0] || 36;
       }
-    } else if (bounds.height && Number.isFinite(bounds.height)) {
-      referenceHeight = bounds.height;
+    } else if (anyRow.bounds?.height && Number.isFinite(anyRow.bounds.height)) {
+      referenceHeight = anyRow.bounds.height;
     }
 
-    // Caveat's cap-height is ~68% of total font size.
-    // Multiplying by ~1.30–1.35 makes the visual height of Caveat numbers
-    // physically match the height of the handwritten digits on screen.
     const fontSize = Math.max(minFontSize, Math.min(maxFontSize, Math.round(referenceHeight * 1.32)));
 
-    // ─── 2. ORIENTATION & SLANT: Linear Regression Angle ─────────────
+    // ─── 2. ORIENTATION, ANCHOR & SLANT ──────────────────────────────
+    let anchorX = 0;
+    let anchorY = 0;
     let theta = 0;
-    if (anyRow.groups && anyRow.groups.length >= 2) {
-      let sumX = 0, sumY = 0;
-      const points: { x: number; y: number }[] = [];
-      for (const g of anyRow.groups) {
-        const maxX = g.bounds.maxX ?? (g.bounds.x + g.bounds.width);
-        const maxY = g.bounds.maxY ?? (g.bounds.y + g.bounds.height);
-        const cx = (g.bounds.x + maxX) / 2;
-        const cy = (g.bounds.y + maxY) / 2;
-        if (Number.isFinite(cx) && Number.isFinite(cy)) {
-          points.push({ x: cx, y: cy });
-          sumX += cx;
-          sumY += cy;
+
+    if (isEquationSolve) {
+      // For LHS = RHS equation solving, render "var = value" below the expression
+      let rowMinX = Infinity;
+      let rowMaxY = -Infinity;
+
+      if (anyRow.groups && anyRow.groups.length > 0) {
+        for (const g of anyRow.groups) {
+          const minX = g.bounds.minX ?? g.bounds.x;
+          const maxY = g.bounds.maxY ?? (g.bounds.y + g.bounds.height);
+          if (Number.isFinite(minX) && minX < rowMinX) rowMinX = minX;
+          if (Number.isFinite(maxY) && maxY > rowMaxY) rowMaxY = maxY;
+        }
+      } else if (anyRow.bounds) {
+        rowMinX = anyRow.bounds.x;
+        rowMaxY = anyRow.bounds.y + anyRow.bounds.height;
+      }
+
+      anchorX = Number.isFinite(rowMinX) ? rowMinX : 0;
+      anchorY = Number.isFinite(rowMaxY) ? rowMaxY + fontSize * 0.7 : 40;
+      theta = 0;
+    } else {
+      // Standard anchoring to the right of the trailing '='
+      const eqGroup = anyRow.groups?.[lastEqualIdx];
+      const bounds = eqGroup?.bounds || anyRow.bounds;
+      if (bounds) {
+        const maxX = bounds.maxX ?? (bounds.x + bounds.width);
+        const minY = bounds.minY ?? bounds.y;
+        const maxY = bounds.maxY ?? (bounds.y + bounds.height);
+
+        anchorX = (Number.isFinite(maxX) ? maxX : bounds.x + (bounds.width || 0)) + gap;
+        anchorY = Number.isFinite(minY) && Number.isFinite(maxY)
+          ? (minY + maxY) / 2
+          : bounds.y + (bounds.height || 0) / 2;
+      }
+
+      // Linear regression angle for standard trailing-equals row
+      if (anyRow.groups && anyRow.groups.length >= 2) {
+        let sumX = 0, sumY = 0;
+        const points: { x: number; y: number }[] = [];
+        for (const g of anyRow.groups) {
+          const maxX = g.bounds.maxX ?? (g.bounds.x + g.bounds.width);
+          const maxY = g.bounds.maxY ?? (g.bounds.y + g.bounds.height);
+          const cx = (g.bounds.x + maxX) / 2;
+          const cy = (g.bounds.y + maxY) / 2;
+          if (Number.isFinite(cx) && Number.isFinite(cy)) {
+            points.push({ x: cx, y: cy });
+            sumX += cx;
+            sumY += cy;
+          }
+        }
+        if (points.length >= 2) {
+          const meanX = sumX / points.length;
+          const meanY = sumY / points.length;
+          let num = 0, den = 0;
+          for (const p of points) {
+            num += (p.x - meanX) * (p.y - meanY);
+            den += (p.x - meanX) ** 2;
+          }
+          if (den > 25) {
+            const slope = num / den;
+            theta = Math.max(-0.35, Math.min(0.35, Math.atan(slope)));
+          }
         }
       }
-      if (points.length >= 2) {
-        const meanX = sumX / points.length;
-        const meanY = sumY / points.length;
-        let num = 0, den = 0;
-        for (const p of points) {
-          num += (p.x - meanX) * (p.y - meanY);
-          den += (p.x - meanX) ** 2;
-        }
-        if (den > 25) {
-          const slope = num / den;
-          // Clamp slope to ±20 degrees (±0.35 rad) to prevent wild tilting
-          theta = Math.max(-0.35, Math.min(0.35, Math.atan(slope)));
-        }
-      }
+    }
+
+    if (!Number.isFinite(anchorX) || !Number.isFinite(anchorY)) {
+      console.warn('[CalcInk:AnswerRenderer] Skipping row: anchor coordinates evaluated to NaN', { row, anchorX, anchorY });
+      continue;
     }
 
     // ─── 3. ADAPTIVE COLOR ───────────────────────────────────────────

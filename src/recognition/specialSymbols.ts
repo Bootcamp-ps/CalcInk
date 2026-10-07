@@ -1,6 +1,6 @@
 // @ts-nocheck
 // ─── Special Symbol Detection ─────────────────────────────────────────
-// Detects symbols with distinct geometric patterns (=, ÷, ., x, (, ))
+// Detects symbols with distinct geometric patterns (=, ÷, ., (, ))
 // that are either missing from standard digit models or have unique
 // multi-stroke signatures. Runs BEFORE the CNN so it takes priority.
 
@@ -12,23 +12,30 @@ export interface SpecialSymbolMatch {
   confidence: number;
 }
 
-/**
- * Return +1 if the stroke goes top-left→bottom-right (\),
- *        -1 if it goes top-right→bottom-left (/),
- *         0 if it is too horizontal/vertical/short to classify.
- */
-function diagonalSign(stroke: Stroke): number {
-  const p0 = stroke.points[0];
-  const pn = stroke.points[stroke.points.length - 1];
-  if (!p0 || !pn) return 0;
-  const b = getStrokeBounds(stroke);
-  if (!b || b.width < 5 || b.height < 5) return 0;
-  const dxSign = pn.x - p0.x;
-  const dySign = pn.y - p0.y;
-  const product = dxSign * dySign;
-  if (product > 0) return 1;  // \ diagonal
-  if (product < 0) return -1; // / diagonal
-  return 0;
+function segmentsIntersect(
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  p3: { x: number; y: number },
+  p4: { x: number; y: number },
+): boolean {
+  function ccw(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) {
+    return (c.y - a.y) * (b.x - a.x) > (b.y - a.y) * (c.x - a.x);
+  }
+  return (
+    ccw(p1, p3, p4) !== ccw(p2, p3, p4) &&
+    ccw(p1, p2, p3) !== ccw(p1, p2, p4)
+  );
+}
+
+function doStrokesIntersect(s1: Stroke, s2: Stroke): boolean {
+  for (let i = 0; i < s1.points.length - 1; i++) {
+    for (let j = 0; j < s2.points.length - 1; j++) {
+      if (segmentsIntersect(s1.points[i], s1.points[i + 1], s2.points[j], s2.points[j + 1])) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -42,39 +49,40 @@ export function detectSpecialSymbol(group: SymbolGroup): SpecialSymbolMatch | nu
   // TWO-STROKE SYMBOLS
   // ─────────────────────────────────────────────────────────────────────
   if (strokes.length === 2) {
-    const b1 = getStrokeBounds(strokes[0]);
-    const b2 = getStrokeBounds(strokes[1]);
+    const s1 = strokes[0];
+    const s2 = strokes[1];
+    const b1 = getStrokeBounds(s1);
+    const b2 = getStrokeBounds(s2);
     if (!b1 || !b2) return null;
 
-    // ── 'x': two crossing diagonal strokes ───────────────────────────
-    // One goes \ (diagonalSign = +1), other goes / (diagonalSign = -1).
-    // Their bounding boxes must overlap in both axes.
-    const d1 = diagonalSign(strokes[0]);
-    const d2 = diagonalSign(strokes[1]);
-    if (d1 !== 0 && d2 !== 0 && d1 !== d2) {
-      const xOverlap = Math.min(b1.x + b1.width, b2.x + b2.width) - Math.max(b1.x, b2.x);
-      const yOverlap = Math.min(b1.y + b1.height, b2.y + b2.height) - Math.max(b1.y, b2.y);
-      const minDim = Math.min(b1.width, b1.height, b2.width, b2.height);
-      if (xOverlap > minDim * 0.2 && yOverlap > minDim * 0.2) {
-        return { token: 'x', confidence: 0.93 };
-      }
+    // If the two strokes intersect/cross each other (like '×' or '+'), they CANNOT be '='
+    if (doStrokesIntersect(s1, s2)) {
+      return null;
     }
 
-    // ── '=': two horizontal strokes stacked vertically ────────────────
-    const isH1 = b1.width >= 6 && b1.width > Math.max(b1.height, 1) * 0.9;
-    const isH2 = b2.width >= 6 && b2.width > Math.max(b2.height, 1) * 0.9;
+    // ── '=': two non-intersecting horizontal strokes stacked vertically ──
+    const isH1 = b1.width >= 8 && b1.width >= b1.height * 1.4;
+    const isH2 = b2.width >= 8 && b2.width >= b2.height * 1.4;
+
     if (isH1 && isH2) {
       const c1y = b1.y + b1.height / 2;
       const c2y = b2.y + b2.height / 2;
       const verticalDist = Math.abs(c1y - c2y);
+
       const xOverlap = Math.min(b1.x + b1.width, b2.x + b2.width) - Math.max(b1.x, b2.x);
       const minW = Math.min(b1.width, b2.width);
       const maxW = Math.max(b1.width, b2.width);
+
+      // Top and bottom bars must have clear vertical separation
+      const top = b1.y < b2.y ? b1 : b2;
+      const bot = b1.y < b2.y ? b2 : b1;
+      const verticalOk = (top.y + top.height) <= (bot.y + bot.height * 0.8) && verticalDist >= 3;
+
       if (
-        xOverlap > 0.25 * minW &&
-        minW / maxW > 0.30 &&
-        verticalDist >= 2 &&
-        verticalDist <= Math.max(60, maxW * 2.5)
+        verticalOk &&
+        xOverlap > 0.35 * minW &&
+        minW / maxW > 0.35 &&
+        verticalDist <= Math.max(50, maxW * 2.0)
       ) {
         return { token: '=', confidence: 0.99 };
       }
