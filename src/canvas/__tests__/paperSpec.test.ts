@@ -183,10 +183,10 @@ describe('palette index preservation', () => {
 // ---------------------------------------------------------------------------
 
 describe('getDefaultPaperSpec', () => {
-  it('returns a ruled cream paper spec', () => {
+  it('returns a ruled blush paper spec', () => {
     const spec = getDefaultPaperSpec();
     expect(spec.type).toBe('ruled');
-    expect(spec.toneSpec.tone).toBe('cream');
+    expect(spec.toneSpec.tone).toBe('blush');
     expect(spec.toneSpec.family).toBe('light');
   });
 });

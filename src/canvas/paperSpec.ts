@@ -197,11 +197,11 @@ export interface PaperSpec {
 
 /**
  * Returns the default PaperSpec for the current environment.
- * Default is ruled + cream (light family) per FR-17.
+ * Default is ruled + blush (pink light family).
  * Called once at app init; not reactive.
  */
 export function getDefaultPaperSpec(): PaperSpec {
-  return { type: 'ruled', toneSpec: getToneSpec('cream') };
+  return { type: 'ruled', toneSpec: getToneSpec('blush') };
 }
 
 // ---------------------------------------------------------------------------
