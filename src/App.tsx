@@ -61,6 +61,7 @@ function App() {
     syncPaletteIndex();
 
     return paperStore.subscribe((state) => {
+      syncPaletteIndex();
       const newFamily = state.spec.toneSpec.family;
       if (newFamily !== prevFamily) {
         prevFamily = newFamily;

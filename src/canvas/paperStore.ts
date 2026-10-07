@@ -31,8 +31,7 @@ export type PaperStoreListener = (state: Readonly<PaperState>) => void;
 /**
  * Manages the current paper type and tone.
  *
- * On construction, the default is `ruled + cream` (or `chalkboard` in dark mode)
- * per the spec.
+ * On construction, the default is `ruled + cream` per the spec.
  */
 export class PaperStore {
   private _state: PaperState;

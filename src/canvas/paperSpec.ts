@@ -197,16 +197,11 @@ export interface PaperSpec {
 
 /**
  * Returns the default PaperSpec for the current environment.
+ * Default is ruled + cream (light family) per FR-17.
  * Called once at app init; not reactive.
  */
 export function getDefaultPaperSpec(): PaperSpec {
-  const prefersDark =
-    typeof window !== 'undefined' &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-  const tone: PaperTone = prefersDark ? 'chalkboard' : 'cream';
-  return { type: 'ruled', toneSpec: getToneSpec(tone) };
+  return { type: 'ruled', toneSpec: getToneSpec('cream') };
 }
 
 // ---------------------------------------------------------------------------
