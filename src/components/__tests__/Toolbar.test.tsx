@@ -258,15 +258,15 @@ describe('Toolbar — paper popover', () => {
 
   it('selected tone dot has aria-pressed=true', () => {
     const paperStore = new PaperStore();
-    // default tone is cream in test env (matchMedia returns false → light mode)
+    // default tone is blush in test env
     renderToolbar({ paperStore });
 
     act(() => {
       (query('[title="Paper settings"]') as HTMLElement).click();
     });
 
-    const creamDot = query('[title="Cream"]') as HTMLElement;
-    expect(creamDot.getAttribute('aria-pressed')).toBe('true');
+    const blushDot = query('[title="Blush"]') as HTMLElement;
+    expect(blushDot.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('clicking a tone dot calls setPaperTone', () => {
