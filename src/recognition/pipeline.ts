@@ -40,6 +40,7 @@ export class RecognitionPipeline {
   private currentJobId: number | null = null;
   private debounceMs: number;
   private rowCacheMap = new Map<string, RowCache>();
+  private varEnv: Record<string, number> = {}; // persists variable assignments across recognition runs
 
   constructor(debounceMs: number = 600) {
     this.debounceMs = debounceMs;
@@ -69,7 +70,8 @@ export class RecognitionPipeline {
 
   public clearCache(): void {
     this.rowCacheMap.clear();
-    resetEnv(); // Clear variable memory when canvas is cleared
+    this.varEnv = {}; // Clear variable memory when canvas is cleared
+    resetEnv();
   }
 
   recognize(strokes: readonly Stroke[], version: number, callback: (results: RowResult[]) => void): void {
@@ -95,7 +97,7 @@ export class RecognitionPipeline {
 
     const pendingTensors: Float32Array[] = [];
     const pendingIndices: { rowIndex: number; groupIndex: number }[] = [];
-    
+
     const newCacheMap = new Map<string, RowCache>();
     const rowResults: RowResult[] = [];
 
@@ -128,7 +130,7 @@ export class RecognitionPipeline {
         const rowId = `row_${Date.now()}_${r}`;
         const tokens: string[] = new Array(row.groups.length).fill('');
         const confidences: number[] = new Array(row.groups.length).fill(0);
-        
+
         for (let g = 0; g < row.groups.length; g++) {
           const group = row.groups[g]!;
           const special = detectSpecialSymbol(group);
@@ -145,7 +147,7 @@ export class RecognitionPipeline {
             }
           }
         }
-        
+
         const newRowResult: RowResult = {
           rowId,
           version,
@@ -159,7 +161,7 @@ export class RecognitionPipeline {
           bounds: row.bounds
         };
         rowResults.push(newRowResult);
-        
+
         newCacheMap.set(signature, {
           rowId,
           version,
@@ -188,8 +190,8 @@ export class RecognitionPipeline {
       this.currentJobId = id;
 
       const worker = this.ensureWorker();
-      
-      const inferencePromise = new Promise<{tokens: string[], confidences: number[]} | null>((resolve) => {
+
+      const inferencePromise = new Promise<{ tokens: string[], confidences: number[] } | null>((resolve) => {
         this.pendingCallbacks.set(id, (workerRes, error) => {
           if (error) resolve(null);
           else resolve(workerRes);
@@ -211,8 +213,13 @@ export class RecognitionPipeline {
       }
     }
 
-    // 4. Parse math per row and populate ContractRowResult fields
-    const env: Record<string, number> = {};
+    // 4. Parse math per row and populate ContractRowResult fields.
+    // Rebuild varEnv from scratch every run — erasing an assignment row removes its
+    // variable on the next run; undo/redo are handled for free since they change
+    // which strokes (and rows) exist. ML inference is still cached; only the cheap
+    // math re-runs on already-known tokens.
+    this.varEnv = {};
+    const env = this.varEnv;
     for (let r = 0; r < rowResults.length; r++) {
       const rowRes = rowResults[r]!;
       rowRes.version = version;
@@ -224,17 +231,40 @@ export class RecognitionPipeline {
       rowRes.expression = rowRes.tokens.join('');
 
       const hasEquals = rowRes.tokens.includes('=');
+      const eqIdx = rowRes.tokens.indexOf('=');
+      const afterEq = eqIdx !== -1
+        ? rowRes.tokens.slice(eqIdx + 1).filter(t => t !== '=')
+        : [];
+      const isTwoSided = eqIdx !== -1 && afterEq.length > 0;
+      const hasVar = rowRes.tokens.some(t => /^[a-zA-Z]$/.test(t));
+
       if (rowRes.tokens.length > 0 && hasEquals) {
-        const parseResult = parseMath(rowRes.tokens, env);
-        if (parseResult.ok) {
-          rowRes.result = parseResult.value.toString();
-          rowRes.evaluation = { ok: true, value: parseResult.value };
+        if (isTwoSided && hasVar) {
+          // Variable assignment (e.g. 4y=16) — solve and store silently, show nothing.
+          // varEnv is always empty at this point (cleared above) so y is never
+          // pre-substituted — no identity-corruption bug possible.
+          parseMath(rowRes.tokens, env);
+          rowRes.result = null;
+          rowRes.evaluation = { ok: false, error: 'VAR_ASSIGN' };
         } else {
-          rowRes.result = parseResult.error === 'Undefined' ? 'Undefined' : '?';
-          rowRes.evaluation = {
-            ok: false,
-            error: parseResult.error ?? 'SYNTAX',
-          };
+          // Non-assignment rows: always parse (may use variables from env)
+          const parseResult = parseMath(rowRes.tokens, env);
+          if (parseResult.ok) {
+            rowRes.result = parseResult.value.toString();
+            rowRes.evaluation = { ok: true, value: parseResult.value };
+          } else if (hasVar) {
+            // Row has a variable but failed (e.g. '3x=' mid-write, or x not yet defined)
+            // Show nothing — user is likely still writing
+            rowRes.result = null;
+            rowRes.evaluation = { ok: false, error: parseResult.error ?? 'VAR_PENDING' };
+          } else {
+            // Pure arithmetic error — show '?'
+            rowRes.result = parseResult.error === 'Undefined' ? 'Undefined' : '?';
+            rowRes.evaluation = {
+              ok: false,
+              error: parseResult.error ?? 'SYNTAX',
+            };
+          }
         }
       } else {
         rowRes.result = null;

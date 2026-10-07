@@ -62,6 +62,9 @@ export async function renderAnswers(
     const eqSymbol = row.symbols[lastEqualIdx];
     if (!eqSymbol) continue;
 
+    // Skip rows with no result (no '=', variable assignments, etc.)
+    if (row.result === null) continue;
+
     // Calculate answer string
     let answerText = '';
     if (row.evaluation.ok) {
