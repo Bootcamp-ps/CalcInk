@@ -65,11 +65,30 @@ flowchart LR
 
 - **Framework**: [React 18](https://react.dev/) + [Vite](https://vitejs.dev/)
 - **Language**: [TypeScript](https://www.typescriptlang.org/) (Strict mode, `noUncheckedIndexedAccess`)
+- **ML Engine**: [TensorFlow.js](https://www.tensorflow.org/js) (`@tensorflow/tfjs`) running off-thread in a Web Worker
+- **Recognition Model**: [MobileNetV2 CNN](https://github.com/Sagyam/Handwritten-Optical-Character-Recognition) (~2.3M parameters, 100×100×3 RGB, 19 classes)
 - **Styling**: Vanilla CSS with curated CSS custom properties (no heavy UI kits)
 - **Ink Smoothing**: [`perfect-freehand`](https://github.com/steveruizok/perfect-freehand)
 - **Persistence**: IndexedDB ([`idb-keyval`](https://github.com/jakearchibald/idb-keyval))
 - **Testing**: [Vitest](https://vitest.dev/) (Unit & integration test suites)
 - **Typography**: Bundled local Latin subsets (`@fontsource/inter`, `@fontsource/caveat`)
+
+---
+
+## 🧠 Machine Learning Model
+
+CalcInk performs on-device optical character recognition using an embedded **MobileNetV2 Convolutional Neural Network**:
+
+- **Model Origin**: [Sagyam/Handwritten-Optical-Character-Recognition](https://github.com/Sagyam/Handwritten-Optical-Character-Recognition) by Sagyam Thapa
+- **Architecture**: MobileNetV2 backbone with 17 inverted residual blocks and depthwise separable convolutions (~2.3M parameters)
+- **Input Tensor**: `[1, 100, 100, 3]` normalized `Float32Array` (100×100 RGB rasterized ink, values `[0.0, 1.0]`)
+- **Output Classes (19)**:
+  - **Digits (0–9)**: `0, 1, 2, 3, 4, 5, 6, 7, 8, 9`
+  - **Operators**: `+` (Add), `-` (Minus), `×` (Multiply), `÷` (Division), `=` (Equals)
+  - **Decimal Point**: `.` (Decimal)
+  - **Variables**: `x` (X), `y` (Y), `z` (Z)
+- **Runtime Environment**: Executed via `@tensorflow/tfjs` in a dedicated Web Worker ([`recognitionWorker.ts`](src/workers/recognitionWorker.ts)) for 60 FPS non-blocking canvas performance.
+- **Model License**: **GNU General Public License v3.0 (GPL-3.0)**
 
 ---
 
@@ -144,4 +163,6 @@ npm run build
 
 ## 📜 License & Compliance
 
-CalcInk is distributed under the MIT License. All bundled fonts and libraries conform to open-source licenses (MIT/Apache-2.0/OFL).
+- **Application Code**: Distributed under the [MIT License](LICENSE).
+- **Machine Learning Model**: Sourced from [Sagyam/Handwritten-Optical-Character-Recognition](https://github.com/Sagyam/Handwritten-Optical-Character-Recognition) and licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+- **Fonts & Libraries**: All bundled dependencies conform to open-source licenses (MIT / Apache-2.0 / OFL).
