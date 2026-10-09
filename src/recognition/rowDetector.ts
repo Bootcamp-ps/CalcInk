@@ -11,11 +11,11 @@ export interface Row {
  * Clusters symbol groups into rows based on vertical overlap,
  * and splits independent equations on the same line if there is a large horizontal gap.
  */
-export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 3.0): Row[] {
+export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 12.0): Row[] {
   if (groups.length === 0) return [];
 
-  // 1. Cluster groups by Y-overlap
-  const yClusters: SymbolGroup[][] = [];
+  // 1. Cluster groups by Y-overlap (using original bounds)
+  const yClusters: typeof groups[] = [];
   
   for (const group of groups) {
     let added = false;
@@ -31,7 +31,6 @@ export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 3
       const groupCenterY = group.bounds.y + group.bounds.height / 2;
       const centerDist = Math.abs(clusterCenterY - groupCenterY);
 
-      // Same row if overlap is > 20% or if center is vertically close to row center
       if (
         (minHeight > 0 && overlapY / minHeight > 0.2) ||
         centerDist < Math.max(clusterHeight * 0.7, 35)
@@ -52,22 +51,21 @@ export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 3
   for (const cluster of yClusters) {
     cluster.sort((a, b) => a.bounds.x - b.bounds.x);
     
-    // Calculate average width of symbols in this cluster
     let totalWidth = 0;
     for (const g of cluster) totalWidth += g.bounds.width;
     const avgWidth = cluster.length > 0 ? totalWidth / cluster.length : 0;
     
     let currentSubRow: SymbolGroup[] = [cluster[0]!];
+    let prevBounds = cluster[0]!.bounds;
+
     for (let i = 1; i < cluster.length; i++) {
-      const prev = cluster[i - 1]!;
       const curr = cluster[i]!;
-      const gap = curr.bounds.x - (prev.bounds.x + prev.bounds.width);
+      const currBounds = curr.bounds;
+      const gap = currBounds.x - (prevBounds.x + prevBounds.width);
       
-      // Dynamic gap threshold based on average symbol width (minimum 50px)
       const dynamicThreshold = Math.max(50, avgWidth * xGapThresholdRatio);
       
       if (gap > dynamicThreshold) {
-        // Gap is too large, split the row here
         rows.push({
           id: `row_${Date.now()}_${rows.length}`,
           groups: currentSubRow,
@@ -77,6 +75,7 @@ export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 3
       } else {
         currentSubRow.push(curr);
       }
+      prevBounds = currBounds;
     }
     
     if (currentSubRow.length > 0) {
@@ -88,8 +87,12 @@ export function detectRows(groups: SymbolGroup[], xGapThresholdRatio: number = 3
     }
   }
   
-  // 3. Sort all final rows from top to bottom
-  rows.sort((a, b) => a.bounds.y - b.bounds.y);
+  // 3. Sort final rows top to bottom
+  rows.sort((a, b) => {
+    const aCy = a.bounds.y + a.bounds.height / 2;
+    const bCy = b.bounds.y + b.bounds.height / 2;
+    return aCy - bCy;
+  });
   
   return rows;
 }

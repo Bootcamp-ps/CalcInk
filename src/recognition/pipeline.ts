@@ -7,7 +7,7 @@ import { groupStrokesIntoSymbols, SymbolGroup } from './symbolGrouper';
 import { detectRows, Row } from './rowDetector';
 import { preprocessSymbol } from './preprocess';
 import { detectSpecialSymbol, SpecialSymbolMatch, ENABLE_BRACKET_RULES, setEnableBracketRules } from './specialSymbols';
-import { evaluateTokens as parseMath, resetEnv } from '../parser';
+import { evaluateTokens as parseMath, resetEnv, solveLinearSystem } from '../parser';
 
 export { ENABLE_BRACKET_RULES, setEnableBracketRules };
 
@@ -238,66 +238,132 @@ export class RecognitionPipeline {
     }
 
     // 4. Parse math per row and populate ContractRowResult fields.
-    // Rebuild varEnv from scratch every run — erasing an assignment row removes its
-    // variable on the next run; undo/redo are handled for free since they change
-    // which strokes (and rows) exist. ML inference is still cached; only the cheap
-    // math re-runs on already-known tokens.
+    // Multi-pass evaluation allows out-of-order variable assignments (e.g. y = x, then x = 3).
     this.varEnv = {};
     const env = this.varEnv;
-    for (let r = 0; r < rowResults.length; r++) {
-      const rowRes = rowResults[r]!;
-      rowRes.version = version;
-      rowRes.symbols = rowRes.groups.map((g, idx) => ({
-        label: rowRes.tokens[idx] ?? '',
-        confidence: rowRes.confidences[idx] ?? 0,
-        strokeIds: g.strokes.map(s => s.id),
-      }));
-      rowRes.expression = rowRes.tokens.join('');
+    const rowDefinedVars = new Map<string, string>(); // rowId -> varName
+    let passes = 0;
+    let lastEnvState = '';
 
-      const hasEquals = rowRes.tokens.includes('=');
-      const eqIdx = rowRes.tokens.indexOf('=');
-      const afterEq = eqIdx !== -1
-        ? rowRes.tokens.slice(eqIdx + 1).filter(t => t !== '=')
-        : [];
-      const isTwoSided = eqIdx !== -1 && afterEq.length > 0;
-      const hasVar = rowRes.tokens.some(t => /^[a-zA-Z]$/.test(t));
+    while (passes < 10) {
+      for (let r = 0; r < rowResults.length; r++) {
+        const rowRes = rowResults[r]!;
+        rowRes.version = version;
+        rowRes.symbols = rowRes.groups.map((g, idx) => ({
+          label: rowRes.tokens[idx] ?? '',
+          confidence: rowRes.confidences[idx] ?? 0,
+          strokeIds: g.strokes.map(s => s.id),
+        }));
+        rowRes.expression = rowRes.tokens.join('');
 
-      if (rowRes.tokens.length > 0 && hasEquals) {
-        if (isTwoSided && hasVar) {
-          // Variable assignment or equation solving (e.g. 4x=16)
-          const parseResult = parseMath(rowRes.tokens, env);
-          if (parseResult.ok) {
-            rowRes.result = parseResult.value.toString();
-            rowRes.evaluation = { ok: true, value: parseResult.value };
+        const hasEquals = rowRes.tokens.includes('=');
+        const eqIdx = rowRes.tokens.indexOf('=');
+        const afterEq = eqIdx !== -1
+          ? rowRes.tokens.slice(eqIdx + 1).filter(t => t !== '=')
+          : [];
+        const isTwoSided = eqIdx !== -1 && afterEq.length > 0;
+        const hasVar = rowRes.tokens.some(t => /^[a-zA-Z]$/.test(t));
+
+        // Create a localized env for this row that hides the variable it solved last pass
+        const rowEnv = { ...env };
+        const previouslyDefinedVar = rowDefinedVars.get(rowRes.rowId);
+        if (previouslyDefinedVar) {
+          delete rowEnv[previouslyDefinedVar];
+        }
+
+        if (rowRes.tokens.length > 0 && hasEquals) {
+          if (isTwoSided && hasVar) {
+            // Variable assignment or equation solving (e.g. 4x=16)
+            const parseResult = parseMath(rowRes.tokens, rowEnv);
+            if (parseResult.ok) {
+              rowRes.result = parseResult.value.toString();
+              rowRes.evaluation = { ok: true, value: parseResult.value, varName: parseResult.varName };
+              rowRes.resultVar = parseResult.varName;
+              if (parseResult.varName) {
+                env[parseResult.varName] = parseResult.value;
+                rowDefinedVars.set(rowRes.rowId, parseResult.varName);
+              }
+            } else {
+              rowRes.result = null;
+              rowRes.evaluation = { ok: false, error: parseResult.error ?? 'VAR_PENDING' };
+              rowRes.resultVar = undefined;
+            }
           } else {
-            rowRes.result = null;
-            rowRes.evaluation = { ok: false, error: 'VAR_PENDING' };
+            // Non-assignment rows: always parse (may use variables from env)
+            const parseResult = parseMath(rowRes.tokens, rowEnv);
+            if (parseResult.ok) {
+              rowRes.result = parseResult.value.toString();
+              rowRes.evaluation = { ok: true, value: parseResult.value };
+            } else if (hasVar) {
+              // Row has a variable but failed (e.g. '3x=' mid-write, or x not yet defined)
+              // Show nothing — user is likely still writing
+              rowRes.result = null;
+              rowRes.evaluation = { ok: false, error: parseResult.error ?? 'VAR_PENDING' };
+            } else {
+              // Pure arithmetic error — show '?'
+              rowRes.result = parseResult.error === 'Undefined' ? 'Undefined' : '?';
+              rowRes.evaluation = {
+                ok: false,
+                error: parseResult.error ?? 'SYNTAX',
+              };
+            }
           }
         } else {
-          // Non-assignment rows: always parse (may use variables from env)
-          const parseResult = parseMath(rowRes.tokens, env);
-          if (parseResult.ok) {
-            rowRes.result = parseResult.value.toString();
-            rowRes.evaluation = { ok: true, value: parseResult.value };
-          } else if (hasVar) {
-            // Row has a variable but failed (e.g. '3x=' mid-write, or x not yet defined)
-            // Show nothing — user is likely still writing
-            rowRes.result = null;
-            rowRes.evaluation = { ok: false, error: parseResult.error ?? 'VAR_PENDING' };
-          } else {
-            // Pure arithmetic error — show '?'
-            rowRes.result = parseResult.error === 'Undefined' ? 'Undefined' : '?';
-            rowRes.evaluation = {
-              ok: false,
-              error: parseResult.error ?? 'SYNTAX',
-            };
+          rowRes.result = null;
+          rowRes.evaluation = { ok: false, error: 'NO_EQUALS' };
+        }
+      }
+      
+      const currentEnvState = JSON.stringify(env);
+      if (currentEnvState === lastEnvState) {
+        break; // Steady state reached!
+      }
+      lastEnvState = currentEnvState;
+      passes++;
+    }
+
+    // 5. System of equations fallback (for 2 variables)
+    // Gather all rows that failed with TOO_MANY_VARS
+    const unsolvedRows = rowResults.filter(r => r.evaluation.ok === false && r.evaluation.error === 'TOO_MANY_VARS');
+    if (unsolvedRows.length >= 2) {
+      // Find pairs of rows that share exactly the SAME 2 unknown variables
+      const rowVars = unsolvedRows.map(r => {
+        const vars = [...new Set(r.tokens.filter(t => /^[a-zA-Z]$/.test(t)))].filter(v => !(v in env)).sort();
+        return { row: r, vars };
+      });
+      
+      const twoVarRows = rowVars.filter(rv => rv.vars.length === 2);
+      
+      // Basic grouping: find first pair that matches
+      for (let i = 0; i < twoVarRows.length; i++) {
+        for (let j = i + 1; j < twoVarRows.length; j++) {
+          const r1 = twoVarRows[i]!;
+          const r2 = twoVarRows[j]!;
+          if (r1.vars.join(',') === r2.vars.join(',')) {
+            const v1 = r1.vars[0]!;
+            const v2 = r1.vars[1]!;
+            const sysResult = solveLinearSystem(r1.row.tokens, r2.row.tokens, v1, v2, env);
+            if (sysResult) {
+              // Update env
+              env[v1] = sysResult[v1]!;
+              env[v2] = sysResult[v2]!;
+              // Update row evaluation so it renders the answer
+              // The first row renders v1
+              r1.row.evaluation = { ok: true, value: sysResult[v1]!, varName: v1 };
+              r1.row.result = sysResult[v1]!.toString();
+              r1.row.resultVar = v1;
+              // The second row renders v2
+              r2.row.evaluation = { ok: true, value: sysResult[v2]!, varName: v2 };
+              r2.row.result = sysResult[v2]!.toString();
+              r2.row.resultVar = v2;
+            }
           }
         }
-      } else {
-        rowRes.result = null;
-        rowRes.evaluation = { ok: false, error: 'NO_EQUALS' };
       }
+    }
 
+    for (let r = 0; r < rowResults.length; r++) {
+      const rowRes = rowResults[r]!;
       console.log(`%c[CalcInk Recognition] Row ${r + 1}: "${rowRes.expression}" -> ${rowRes.result ?? '(waiting for =)'}`,
         'background: #1e293b; color: #38bdf8; font-weight: bold; padding: 2px 6px; border-radius: 4px;',
         {

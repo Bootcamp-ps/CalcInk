@@ -90,6 +90,8 @@ CalcInk performs on-device optical character recognition using an embedded **Mob
 - **Runtime Environment**: Executed via `@tensorflow/tfjs` in a dedicated Web Worker ([`recognitionWorker.ts`](src/workers/recognitionWorker.ts)) for 60 FPS non-blocking canvas performance.
 - **Model License**: **GNU General Public License v3.0 (GPL-3.0)**
 
+### Considered Alternative Models
+- **[kimseungdae/ink-on](https://github.com/kimseungdae/ink-on)**: An impressive in-browser implementation of the CoMER (Contextualized Mathematical Expression Recognition) Transformer model via ONNX Runtime Web. While it boasts excellent accuracy for complete equations, we ultimately selected MobileNetV2 for its significantly smaller bundle size (~1.5MB vs 30MB+), faster CPU inference (<5ms), and compatibility with our custom spatial grouping and parsing architecture.
 ---
 
 ## 📁 Project Structure

@@ -64,8 +64,7 @@ export async function renderAnswers(
     const anyRow = row as any;
     const afterEqSymbols = row.symbols.slice(eqIdx + 1).filter(s => s?.label && s.label !== '=');
     const isTwoSided = afterEqSymbols.length > 0;
-    const varSymbol = row.symbols.find(s => /^[a-zA-Z]$/.test(s?.label ?? ''));
-    const varName = varSymbol ? varSymbol.label.toLowerCase() : null;
+    const varName = anyRow.resultVar || null;
     const isEquationSolve = isTwoSided && varName !== null && row.evaluation.ok;
 
     // Skip rows with no result (no '=', variable assignments, etc.)

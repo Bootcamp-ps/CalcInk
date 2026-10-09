@@ -22,3 +22,10 @@ Thumbs.db
 
 # Tooling logs & local configs
 .playwright-mcp/
+
+# Training data & outputs (scripts are tracked, data is not)
+training/data/
+training/output/
+training/*.h5
+training/*.zip
+kaggle.json

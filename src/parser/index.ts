@@ -4,7 +4,7 @@
 // implicit multiplication, and linear equation solving (LHS = RHS).
 
 export type ParseResult =
-  | { ok: true; value: number }
+  | { ok: true; value: number; varName?: string }
   | { ok: false; error: string };
 
 // ─── Polynomial Algebra ────────────────────────────────────────────
@@ -304,12 +304,11 @@ export function resetEnv(): void {
 }
 
 /**
- * Detect which single variable (if any) appears in the token list.
- * Returns variable name, or null if none or more than one.
+ * Detect which variables are not yet in the environment.
  */
-function findVariable(tokens: Token[]): string | null {
+function findUnknownVariables(tokens: Token[], env: Record<string, number>): string[] {
   const vars = [...new Set(tokens.filter(t => t.kind === 'VAR').map(t => t.value))];
-  return vars.length === 1 ? vars[0]! : null;
+  return vars.filter(v => !(v in env));
 }
 
 /**
@@ -343,22 +342,100 @@ export function evaluate(input: string, env: Record<string, number> = globalEnv)
 
   // ── Mode 1: EQUATION SOLVE ───────────────────────────────────────────
   if (isTwoSided) {
-    const varName = findVariable(nonEofTokens);
+    const unknownVars = findUnknownVariables(nonEofTokens, env);
+    if (unknownVars.length > 1) {
+      return { ok: false, error: 'TOO_MANY_VARS' }; // Requires another pass or more equations
+    }
+    const varName = unknownVars.length === 1 ? unknownVars[0]! : undefined;
+    
     const parser = new Parser(tokens);
-    const result = parser.parse(env, varName ?? undefined);
-    if (result.ok && varName !== null) {
+    const result = parser.parse(env, varName);
+    if (result.ok && varName !== undefined) {
       env[varName] = result.value;
+      return { ok: true, value: result.value, varName };
     }
     return result;
   }
 
   // ── Mode 2: EXPRESSION EVALUATE ──────────────────────────────────────
-  const varName = findVariable(nonEofTokens);
-  if (varName !== null && !(varName in env)) {
-    return { ok: false, error: `Variable '${varName}' is not defined` };
+  const unknownVars = findUnknownVariables(nonEofTokens, env);
+  if (unknownVars.length > 0) {
+    return { ok: false, error: `Variables not defined: ${unknownVars.join(', ')}` };
   }
   const parser = new Parser(tokens);
   return parser.parse(env);
+}
+
+/**
+ * Solves a 2x2 system of linear equations.
+ */
+export function solveLinearSystem(
+  tokens1: string[],
+  tokens2: string[],
+  var1: string,
+  var2: string,
+  env: Record<string, number>
+): { [key: string]: number } | null {
+  // Extract A, B, C for Eq 1: A*var1 + B*var2 + C = 0
+  const getCoeffs = (tokens: string[]) => {
+    // We can extract A and C by evaluating with var2 = 0
+    // Then B by evaluating with var1 = 0 and var2 = 1
+    // Actually, we can just temporarily patch the Parser to return the Polynomial,
+    // or we can evaluate the expression numerically since it's linear!
+    // Let's create a custom small parser run:
+    const eqIdx = tokens.indexOf('=');
+    if (eqIdx === -1) return null;
+    const lhs = tokens.slice(0, eqIdx);
+    const rhs = tokens.slice(eqIdx + 1);
+    
+    // Evaluate an expression numerically by replacing variables with constants
+    const evalExpr = (exprTokens: string[], v1: number, v2: number): number | null => {
+      const testEnv = { ...env, [var1]: v1, [var2]: v2 };
+      const parser = new Parser(exprTokens.map(t => ({ kind: 'UNKNOWN', value: t } as any))); // We just need to tokenize
+      // Wait, evaluateTokens already tokenizes!
+      const res = evaluate(exprTokens.join(''), testEnv);
+      if (res.ok) return res.value;
+      return null;
+    };
+    
+    // f(v1, v2) = LHS - RHS
+    const evalF = (v1: number, v2: number) => {
+      const l = evalExpr(lhs, v1, v2);
+      const r = evalExpr(rhs, v1, v2);
+      if (l === null || r === null) return null;
+      return l - r;
+    };
+    
+    const f00 = evalF(0, 0);
+    const f10 = evalF(1, 0);
+    const f01 = evalF(0, 1);
+    
+    if (f00 === null || f10 === null || f01 === null) return null;
+    
+    const C = f00;
+    const A = f10 - f00;
+    const B = f01 - f00;
+    return { A, B, C };
+  };
+
+  const eq1 = getCoeffs(tokens1);
+  const eq2 = getCoeffs(tokens2);
+  
+  if (!eq1 || !eq2) return null;
+  
+  // Cramer's rule for:
+  // A1*x + B1*y = -C1
+  // A2*x + B2*y = -C2
+  const det = eq1.A * eq2.B - eq2.A * eq1.B;
+  if (Math.abs(det) < 1e-10) return null; // parallel or identical
+  
+  const detX = (-eq1.C) * eq2.B - (-eq2.C) * eq1.B;
+  const detY = eq1.A * (-eq2.C) - eq2.A * (-eq1.C);
+  
+  const val1 = Math.round((detX / det) * 1e10) / 1e10;
+  const val2 = Math.round((detY / det) * 1e10) / 1e10;
+  
+  return { [var1]: val1, [var2]: val2 };
 }
 
 export function evaluateTokens(tokens: string[], env?: Record<string, number>): ParseResult {

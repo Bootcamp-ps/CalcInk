@@ -28,22 +28,18 @@ try {
 }
 
 const SAGYAM_CLASSES = [
-  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-  'Add', 'Decimal', 'Division', 'Equals', 'Multiply', 'Minus', 'X', 'Y', 'Z'
+  '0','1','2','3','4','5','6','7','8','9',
+  'Add','Decimal','Division','Equals','Multiply','Minus',
+  'X','Y','Z',
+  'L_Paren','R_Paren','Caret','Sqrt','Pi','A','B'
 ];
 
 const SAGYAM_TOKEN_MAP: Record<string, string> = {
   '0': '0', '1': '1', '2': '2', '3': '3', '4': '4',
   '5': '5', '6': '6', '7': '7', '8': '8', '9': '9',
-  'Add': '+',
-  'Decimal': '.',
-  'Division': '÷',
-  'Equals': '=',
-  'Multiply': '×',
-  'Minus': '-',
-  'X': 'x',
-  'Y': 'y',
-  'Z': 'z'
+  'Add': '+', 'Decimal': '.', 'Division': '÷', 'Equals': '=',
+  'Multiply': '×', 'Minus': '-', 'X': 'x', 'Y': 'y', 'Z': 'z',
+  'L_Paren': '(', 'R_Paren': ')', 'Caret': '^', 'Sqrt': '√', 'Pi': 'π', 'A': 'a', 'B': 'b'
 };
 
 // 17 Classes from irfanchahyadi/Handwriting-Calculator for 784 fallback
@@ -53,7 +49,7 @@ const CLASS_LABELS: Record<number, string> = {
   10: '+', 11: '-', 12: '×', 13: '÷', 14: '(', 15: ')', 16: '.',
 };
 
-let tfModel: tf.LayersModel | null = null;
+let tfModel: tf.GraphModel | null = null;
 let fallbackWeights: {
   w1: Float32Array; b1: Float32Array;
   w2: Float32Array; b2: Float32Array;
@@ -68,7 +64,7 @@ async function initModel(): Promise<void> {
   initPromise = (async () => {
     // 1. Load MobileNetV2 CNN model
     try {
-      tfModel = await tf.loadLayersModel('/models/sagyam/model.json');
+      tfModel = await tf.loadGraphModel('/models/sagyam/model.json');
       console.log('MobileNetV2 CNN model loaded successfully!');
     } catch (e) {
       console.warn('Failed to load MobileNetV2, trying fallback weights:', e);
